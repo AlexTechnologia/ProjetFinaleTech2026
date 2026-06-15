@@ -364,37 +364,41 @@ class CraftingSystem {
 
   // Compte le nombre d'un item dans l'inventaire
   countItem(inventory, type) {
-    return inventory.reduce((sum, slot) => {
+    if (inventory.countItem) return inventory.countItem(type);
+    const arr = inventory.slots || inventory;
+    return arr.reduce((sum, slot) => {
       return sum + (slot && slot.type === type ? slot.count : 0);
     }, 0);
   }
 
   // Retire des items de l'inventaire
   removeItems(inventory, type, amount) {
+    if (inventory.removeItem) return inventory.removeItem(type, amount);
+    const arr = inventory.slots || inventory;
     let remaining = amount;
-    for (let i = 0; i < inventory.length && remaining > 0; i++) {
-      if (inventory[i] && inventory[i].type === type) {
-        const take = Math.min(inventory[i].count, remaining);
-        inventory[i].count -= take;
+    for (let i = 0; i < arr.length && remaining > 0; i++) {
+      if (arr[i] && arr[i].type === type) {
+        const take = Math.min(arr[i].count, remaining);
+        arr[i].count -= take;
         remaining -= take;
-        if (inventory[i].count <= 0) inventory[i] = null;
+        if (arr[i].count <= 0) arr[i] = null;
       }
     }
   }
 
-  // Ajoute un item à l'inventaire (premier slot libre ou stack)
+  // Ajoute un item à l'inventaire
   addItem(inventory, item) {
-    // Chercher un slot du même type pour stacker
-    for (let i = 0; i < inventory.length; i++) {
-      if (inventory[i] && inventory[i].type === item.type && !item.stats) {
-        inventory[i].count += item.count;
+    if (inventory.addItem) return inventory.addItem(item.type, item.count);
+    const arr = inventory.slots || inventory;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].type === item.type) {
+        arr[i].count += item.count;
         return i;
       }
     }
-    // Sinon, premier slot vide
-    for (let i = 0; i < inventory.length; i++) {
-      if (!inventory[i]) {
-        inventory[i] = { ...item };
+    for (let i = 0; i < arr.length; i++) {
+      if (!arr[i]) {
+        arr[i] = { ...item };
         return i;
       }
     }

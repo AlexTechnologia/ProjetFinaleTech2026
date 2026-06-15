@@ -253,54 +253,25 @@
 <!-- ══════════════════════════════════════════════════
      SCRIPTS
 ══════════════════════════════════════════════════ -->
-<script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  }
-</script>
-
-<script type="module">
-  import * as THREE from 'three';
-  import { Water } from 'three/addons/objects/Water.js';
-  import { Sky } from 'three/addons/objects/Sky.js';
-  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-  import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-
-  // Make THREE globally available for our vanilla JS scripts as a mutable object
-  window.THREE = Object.assign({}, THREE);
-  window.THREE.Water = Water;
-  window.THREE.Sky = Sky;
-  window.THREE.EffectComposer = EffectComposer;
-  window.THREE.RenderPass = RenderPass;
-  window.THREE.ShaderPass = ShaderPass;
-  window.THREE.UnrealBloomPass = UnrealBloomPass;
-
-  // Load game scripts sequentially after THREE is fully initialized
-  const scripts = [
-    'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js',
-    'js/audio.js',
-    'js/save.js',
-    'js/crafting.js',
-    'js/network.js',
-    'js/world.js',
-    'js/entities.js',
-    'js/player.js',
-    'js/ui.js',
-    'js/main.js'
-  ];
-  
-  for (const src of scripts) {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = false; // Preserves execution order
-    document.body.appendChild(s);
-  }
-</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/objects/Water.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/objects/Sky.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/save.js"></script>
+<script src="js/crafting.js"></script>
+<script src="js/network.js"></script>
+<script src="js/world.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/player.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
 
 </body>
 </html>

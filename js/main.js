@@ -497,6 +497,7 @@ class PlayerAdapter {
     this.isLocked = false;
 
     // PointerLock controls inline
+    this.controls = this._buildControls(camera, domElement);
     // Held item
     this.heldItemContainer = new THREE.Group();
     this.heldItemContainer.position.set(0.5, -0.4, -0.8);
