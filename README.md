@@ -21,10 +21,10 @@
 ## 🚀 Comment jouer
 
 ### En ligne (GitHub Pages)
-Visitez : `https://[VOTRE_PSEUDO].github.io/island-survivor/`
+Visitez : `https://alextechnologia.github.io/ProjetFinaleTech2026/`
 
 ### En local
-1. Clonez le repo : `git clone https://github.com/[VOTRE_PSEUDO]/island-survivor.git`
+1. Clonez le repo : `git clone https://alextechnologia.github.io/ProjetFinaleTech2026.git`
 2. Ouvrez `index.html` dans un serveur local (Live Server, npx serve, etc.)
 3. Partagez votre code de salle avec vos amis !
 
@@ -96,7 +96,7 @@ Voir [journal.html](journal.html) pour le journal de bord complet (8 jours de d�
 
 ## 🎓 Contexte académique
 
-Ce projet a été réalisé dans le cadre du cours **ICS3U — Informatique et programmation** comme projet final valant 30% de la note finale. Développé en équipe de 2 sur une période de 8 jours.
+Ce projet a été réalisé dans le cadre du cours **ICS4U — Informatique et programmation** comme projet final valant 30% de la note finale. Développé en équipe de 2 sur une période de 8 jours.
 
 ### Concepts démontrés
 - Programmation orientée objet (classes ES6)
@@ -108,4 +108,4 @@ Ce projet a été réalisé dans le cadre du cours **ICS3U — Informatique et p
 
 ---
 
-*Projet ICS3U / ICS4U — École secondaire — Juin 2026*
+*Projet ICS4U — École secondaire — Juin 2026*
