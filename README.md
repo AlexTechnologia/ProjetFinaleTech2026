@@ -2,7 +2,7 @@
 
 **Un jeu de survie multijoueur en navigateur** — récoltez des ressources, craftez des outils, et survivez aux vagues nocturnes avec vos amis.
 
-[![GitHub Pages](https://img.shields.io/badge/Jouer-GitHub%20Pages-brightgreen)](https://[VOTRE_PSEUDO].github.io/island-survivor/)
+[![GitHub Pages](https://img.shields.io/badge/Jouer-GitHub%20Pages-brightgreen)](https://alextechnologia.github.io/ProjetFinaleTech2026/)
 
 ---
 
