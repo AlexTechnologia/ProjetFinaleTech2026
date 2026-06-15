@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Vanilla JS Unit Tests - Island Survivor</title>
+  <style>
+    :root {
+      --bg-color: #1e1e2e;
+      --panel-bg: #282a36;
+      --text-main: #f8f8f2;
+      --text-muted: #6272a4;
+      --accent: #bd93f9;
+      --success: #50fa7b;
+      --error: #ff5555;
+      --border: #44475a;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      margin: 0;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      color: var(--accent);
+      margin: 0 0 0.5rem 0;
+    }
+
+    .summary {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 1.1rem;
+      background: var(--panel-bg);
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat {
+      font-weight: bold;
+    }
+    .stat.passed { color: var(--success); }
+    .stat.failed { color: var(--error); }
+
+    .test-suite {
+      background: var(--panel-bg);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .suite-header {
+      background: var(--border);
+      padding: 1rem 1.5rem;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .test-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .test-item {
+      display: flex;
+      flex-direction: column;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .test-item:last-child {
+      border-bottom: none;
+    }
+
+    .test-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .test-name {
+      font-weight: 500;
+    }
+
+    .test-status {
+      font-weight: bold;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-pass {
+      background: rgba(80, 250, 123, 0.2);
+      color: var(--success);
+    }
+
+    .status-fail {
+      background: rgba(255, 85, 85, 0.2);
+      color: var(--error);
+    }
+
+    .error-details {
+      margin-top: 0.8rem;
+      padding: 0.8rem;
+      background: rgba(0,0,0,0.3);
+      border-left: 4px solid var(--error);
+      color: #ffb86c;
+      font-family: monospace;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      border-radius: 0 4px 4px 0;
+    }
+  </style>
+
+  <!-- MOCK THREE.JS (Required by player.js) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- SOURCE FILES -->
+  <script src="../js/player.js"></script>
+  <script src="../js/crafting.js"></script>
+  <script src="../js/world.js"></script>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>Island Survivor - Unit Tests</h1>
+      <p style="color: var(--text-muted); margin: 0;">Vanilla JavaScript Test Runner</p>
+    </header>
+
+    <div class="summary">
+      <div>Total: <span id="totalCount" class="stat">0</span></div>
+      <div>Passed: <span id="passCount" class="stat passed">0</span></div>
+      <div>Failed: <span id="failCount" class="stat failed">0</span></div>
+      <div id="duration" style="margin-left: auto; color: var(--text-muted);">0ms</div>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <script>
+    // --- MICRO TEST RUNNER ---
+    const suites = [];
+    let currentSuite = null;
+
+    function describe(name, fn) {
+      currentSuite = { name, tests: [] };
+      suites.push(currentSuite);
+      fn();
+    }
+
+    function it(name, fn) {
+      currentSuite.tests.push({ name, fn });
+    }
+
+    const assert = {
+      equal: (actual, expected, msg) => {
+        if (actual !== expected) {
+          throw new Error(msg || `Expected ${expected}, but got ${actual}`);
+        }
+      },
+      deepEqual: (actual, expected, msg) => {
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+          throw new Error(msg || `Expected ${JSON.stringify(expected)}, but got ${JSON.stringify(actual)}`);
+        }
+      },
+      isTrue: (actual, msg) => {
+        if (actual !== true) throw new Error(msg || "Expected true");
+      },
+      isFalse: (actual, msg) => {
+        if (actual !== false) throw new Error(msg || "Expected false");
+      },
+      notNull: (actual, msg) => {
+        if (actual === null || actual === undefined) throw new Error(msg || "Expected value not to be null/undefined");
+      }
+    };
+
+    // --- TEST DEFINITIONS ---
+
+    describe('Inventory Class', () => {
+      it('should initialize with correct size', () => {
+        const inv = new Inventory(20);
+        assert.equal(inv.size, 20);
+        assert.equal(inv.slots.length, 20);
+      });
+
+      it('should add items to empty slots', () => {
+        const inv = new Inventory();
+        const leftover = inv.addItem('wood', 5);
+        assert.equal(leftover, 0);
+        assert.equal(inv.slots[0].type, 'wood');
+        assert.equal(inv.slots[0].count, 5);
+      });
+
+      it('should stack items of the same type', () => {
+        const inv = new Inventory();
+        inv.addItem('wood', 5);
+        inv.addItem('wood', 10);
+        assert.equal(inv.slots[0].count, 15);
+      });
+
+      it('should remove items correctly', () => {
+        const inv = new Inventory();
+        inv.addItem('rock', 10);
+        const removed = inv.removeItem('rock', 4);
+        assert.equal(removed, 4);
+        assert.equal(inv.slots[0].count, 6);
+      });
+
+      it('should return correct total item count across slots', () => {
+        const inv = new Inventory();
+        inv.slots[0] = { type: 'iron_ore', count: 5 };
+        inv.slots[1] = { type: 'iron_ore', count: 7 };
+        assert.equal(inv.countItem('iron_ore'), 12);
+      });
+      
+      it('should drop selected item', () => {
+        const inv = new Inventory();
+        inv.addItem('apple', 3);
+        inv.selectSlot(0);
+        const dropped = inv.dropSelected();
+        assert.deepEqual(dropped, { type: 'apple', count: 1 });
+        assert.equal(inv.slots[0].count, 2);
+      });
+    });
+
+    describe('CraftingSystem', () => {
+      it('should identify craftable items without workstation', () => {
+        const cs = new CraftingSystem();
+        const inv = new Inventory();
+        inv.addItem('wood', 10);
+        const recipes = cs.getAvailableRecipes(inv.slots, null);
+        assert.isTrue(recipes.some(r => r.id === 'campfire'));
+        assert.isTrue(recipes.some(r => r.id === 'workbench'));
+      });
+
+      it('should require specific workstations', () => {
+        const cs = new CraftingSystem();
+        const inv = new Inventory();
+        inv.addItem('wood', 5);
+        
+        // Cannot craft wooden_axe without workbench
+        assert.isFalse(cs.canCraft(cs.getRecipeById('wooden_axe'), inv.slots));
+        
+        // Wait, canCraft only checks ingredients. getAvailableRecipes checks workstation
+        const noWs = cs.getAvailableRecipes(inv.slots, null);
+        assert.isFalse(noWs.some(r => r.id === 'wooden_axe'));
+        
+        const withWs = cs.getAvailableRecipes(inv.slots, 'workbench');
+        assert.isTrue(withWs.some(r => r.id === 'wooden_axe'));
+      });
+
+      it('should successfully craft and modify inventory', () => {
+        const cs = new CraftingSystem();
+        const inv = new Inventory();
+        inv.addItem('wood', 5);
+        
+        const result = cs.craft('wooden_axe', inv.slots, 'workbench');
+        assert.isTrue(result.success);
+        assert.equal(result.item.type, 'wooden_axe');
+        assert.equal(inv.slots[0].count, 0); // wood removed, wait, removeItems sets slot to null
+        assert.equal(inv.slots[0], null);
+        // Axe added to next available slot, but addItem starts from beginning
+        assert.equal(inv.slots[0].type, 'wooden_axe');
+      });
+      
+      it('should fail craft if resources insufficient', () => {
+        const cs = new CraftingSystem();
+        const inv = new Inventory();
+        inv.addItem('wood', 3); // needs 5
+        const result = cs.craft('wooden_axe', inv.slots, 'workbench');
+        assert.isFalse(result.success);
+        assert.equal(result.message, 'Ressources insuffisantes');
+      });
+    });
+
+    describe('World Generation & Mechanics', () => {
+      it('should generate deterministically based on seed', () => {
+        const w1 = new World();
+        w1.generate(12345);
+        
+        const w2 = new World();
+        w2.generate(12345);
+        
+        assert.equal(w1.resources.size, w2.resources.size);
+        
+        const res1 = Array.from(w1.resources.values());
+        const res2 = Array.from(w2.resources.values());
+        
+        assert.equal(res1[0].position.x, res2[0].position.x);
+        assert.equal(res1[0].position.z, res2[0].position.z);
+      });
+
+      it('should damage resources properly', () => {
+        const w = new World();
+        w.generate(12345);
+        
+        const resList = Array.from(w.resources.values());
+        const res = resList[0];
+        const initialHealth = res.health;
+        
+        const result = w.damageResource(res.networkId, 10);
+        assert.isFalse(result.destroyed);
+        assert.equal(w.getResource(res.networkId).health, initialHealth - 10);
+      });
+
+      it('should destroy resources and produce drops', () => {
+        const w = new World();
+        w.generate(12345);
+        
+        const resList = Array.from(w.resources.values());
+        const res = resList[0];
+        
+        const result = w.damageResource(res.networkId, 9999);
+        assert.isTrue(result.destroyed);
+        assert.notNull(result.drops);
+        assert.isTrue(result.drops.length > 0);
+        
+        // Cannot damage destroyed resource
+        const result2 = w.damageResource(res.networkId, 10);
+        assert.isFalse(result2.destroyed);
+      });
+
+      it('should manage and locate workstations', () => {
+        const w = new World();
+        w.placeWorkstation('workbench', {x: 10, y: 0, z: 10}, 'player1');
+        
+        // Close enough
+        const wsType = w.getNearbyWorkstation({x: 12, y: 0, z: 10}, 5);
+        assert.equal(wsType, 'workbench');
+        
+        // Too far
+        const wsTypeFar = w.getNearbyWorkstation({x: 50, y: 0, z: 50}, 5);
+        assert.equal(wsTypeFar, null);
+      });
+    });
+
+    // --- TEST RUNNER LOGIC ---
+
+    async function runTests() {
+      const resultsContainer = document.getElementById('results');
+      let total = 0, passed = 0, failed = 0;
+      const start = performance.now();
+
+      for (const suite of suites) {
+        const suiteEl = document.createElement('div');
+        suiteEl.className = 'test-suite';
+        
+        const suiteHeader = document.createElement('div');
+        suiteHeader.className = 'suite-header';
+        suiteHeader.textContent = suite.name;
+        suiteEl.appendChild(suiteHeader);
+
+        const listEl = document.createElement('ul');
+        listEl.className = 'test-list';
+
+        for (const test of suite.tests) {
+          total++;
+          const itemEl = document.createElement('li');
+          itemEl.className = 'test-item';
+          
+          const mainEl = document.createElement('div');
+          mainEl.className = 'test-main';
+          
+          const nameEl = document.createElement('div');
+          nameEl.className = 'test-name';
+          nameEl.textContent = test.name;
+          
+          const statusEl = document.createElement('div');
+          statusEl.className = 'test-status';
+          
+          mainEl.appendChild(nameEl);
+          mainEl.appendChild(statusEl);
+          itemEl.appendChild(mainEl);
+          
+          try {
+            await test.fn();
+            statusEl.textContent = 'PASS';
+            statusEl.classList.add('status-pass');
+            passed++;
+          } catch (err) {
+            statusEl.textContent = 'FAIL';
+            statusEl.classList.add('status-fail');
+            failed++;
+            
+            const errEl = document.createElement('div');
+            errEl.className = 'error-details';
+            errEl.textContent = err.stack || err.message;
+            itemEl.appendChild(errEl);
+          }
+          
+          listEl.appendChild(itemEl);
+        }
+        
+        suiteEl.appendChild(listEl);
+        resultsContainer.appendChild(suiteEl);
+      }
+
+      const duration = (performance.now() - start).toFixed(1);
+      
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('passCount').textContent = passed;
+      document.getElementById('failCount').textContent = failed;
+      document.getElementById('duration').textContent = `${duration}ms`;
+    }
+
+    // Run when loaded
+    window.addEventListener('DOMContentLoaded', runTests);
+  </script>
+</body>
+</html>
