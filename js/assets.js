@@ -22,6 +22,14 @@
     rock_c:     'rock-c.glb',
     ore_stone:  'resource-stone.glb',
     flint:      'rock-flat.glb',
+    // ── held-item viewmodels (static GLB shown in the player's hand) ──
+    'tool-axe':       'tool-axe.glb',
+    'tool-pickaxe':   'tool-pickaxe.glb',
+    'resource-wood':  'resource-wood.glb',
+    'resource-stone': 'resource-stone.glb',
+    'rock-flat':      'rock-flat.glb',
+    'rock-a':         'rock-a.glb',
+    'rock-b':         'rock-b.glb',
     // ── structures / workstations (static GLB) ──
     campfire:        'campfire-pit.glb',
     workbench:       'workbench.glb',

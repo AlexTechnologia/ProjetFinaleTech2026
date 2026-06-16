@@ -71,6 +71,9 @@ const RESOURCE_DROPS = {
   rock:        () => [{ type: 'rock', count: 2 + Math.floor(Math.random() * 3) },
                       ...(Math.random() < 0.3 ? [{ type: 'flint', count: 1 }] : [])],
   iron_ore:    () => [{ type: 'iron_ore', count: 2 + Math.floor(Math.random() * 2) }],
+  coal:        () => [{ type: 'coal', count: 2 + Math.floor(Math.random() * 3) }],
+  gold_ore:    () => [{ type: 'gold_ore', count: 1 + Math.floor(Math.random() * 2) },
+                      ...(Math.random() < 0.25 ? [{ type: 'gold_ore', count: 1 }] : [])],
   flint_node:  () => [{ type: 'flint', count: 2 + Math.floor(Math.random() * 2) }],
   pink_shroom: () => [{ type: 'pink_shroom', count: 1 }],
   red_shroom:  () => [{ type: 'red_shroom', count: 1 }],
@@ -141,6 +144,34 @@ class World {
         this.resources.set(networkId, resource);
       }
     }
+    // ── Cave/grotto ores: coal, gold and extra iron concentrated inside the
+    //    carved grotto zones, so descending underground actually pays off.
+    //    Runs after the surface pass in a fixed order → fully deterministic.
+    const caveOres = [
+      { type: 'coal',     count: 45, health: 70, scale: 0.8 },
+      { type: 'gold_ore', count: 26, health: 95, scale: 0.8 },
+      { type: 'iron_ore', count: 30, health: 80, scale: 0.8 },
+    ];
+    for (const cfg of caveOres) {
+      let placed = 0, tries = 0;
+      while (placed < cfg.count && tries < cfg.count * 80) {
+        tries++;
+        const x = (this.rng() - 0.5) * WORLD.SIZE * 0.9;
+        const z = (this.rng() - 0.5) * WORLD.SIZE * 0.9;
+        if (Math.hypot(x, z) > WORLD.ISLAND_RADIUS - 8) continue;
+        if (this.caveDepth(x, z) < 0.3) continue; // only inside grottos
+        const y = this.getHeightAt(x, z);
+        if (y < 0) continue;
+        const networkId = `res_${idCounter++}`;
+        this.resources.set(networkId, {
+          networkId, type: cfg.type, position: { x, y, z },
+          health: cfg.health, maxHealth: cfg.health,
+          scale: cfg.scale * (0.8 + this.rng() * 0.4), mesh: null,
+        });
+        placed++;
+      }
+    }
+
     console.log(`[World] Monde généré — seed: ${seed}, ressources: ${this.resources.size}`);
     return this;
   }
@@ -187,6 +218,26 @@ class World {
     return { destroyed: true, drops, resource };
   }
 
+  // Deterministic cave/grotto field. High values mark sunken rocky grottos
+  // carved into the island where the richest ores (coal, iron, gold) appear.
+  caveField(x, z) {
+    if (!this.noise2) return 0;
+    return this.noise2(x * 0.018 + 50, z * 0.018 - 50);
+  }
+
+  // Carving strength (0..1) at a point; 0 outside grotto zones.
+  caveDepth(x, z) {
+    const c = this.caveField(x, z);
+    if (c <= 0.45) return 0;
+    const t = (c - 0.45) / 0.55;
+    return Math.min(1, t * t);
+  }
+
+  // True where the terrain has been carved into an explorable grotto.
+  isCaveZone(x, z) {
+    return this.caveDepth(x, z) > 0.25;
+  }
+
   getHeightAt(x, z) {
     if (!this.noise1) return 0;
     const dist = Math.hypot(x, z);
@@ -215,6 +266,14 @@ class World {
     const mountains = mMask * mMask * (0.45 + 0.55 * ridge) * 34;
 
     let h = (hills + centre + mountains) * mask;
+
+    // Carve sunken grottos ("caves") into the solid interior. A pure heightfield
+    // can't do true overhangs, so these are deep rocky basins you descend into
+    // to mine the rarest ores. The floor stays above sea level so they stay dry.
+    const carve = this.caveDepth(x, z);
+    if (carve > 0 && mask > 0.6) {
+      h = Math.max(1.5, h - carve * 12);
+    }
 
     // Gentle sea floor beyond the shoreline.
     if (dist > R) h = -3 - (dist - R) * 0.08;

@@ -147,16 +147,34 @@ class UI {
     const def = window.ITEM_DB?.[item.type];
     if (!def) return;
 
-    this.els.tooltipName.textContent = `${def.icon || '📦'} ${def.name || item.type}`;
-    this.els.tooltipDesc.textContent = def.desc || '';
+    const RARITY = {
+      common:   { label: 'Commun',     color: '#c8c8d0' },
+      uncommon: { label: 'Peu commun', color: '#5fd35f' },
+      rare:     { label: 'Rare',       color: '#5aa9ff' },
+      epic:     { label: 'Épique',     color: '#c264ff' },
+    };
+    const rar = RARITY[def.rarity] || RARITY.common;
+    const iconUrl = window.VCIcons ? window.VCIcons.url(def.iconKey || item.type) : null;
+    const iconHtml = iconUrl
+      ? `<img class="tooltip-icon" src="${iconUrl}" alt="">`
+      : `<span class="tooltip-icon-emoji">${def.icon || '📦'}</span>`;
+    this.els.tooltipName.innerHTML = `${iconHtml}<span style="color:${rar.color}">${def.name || item.type}</span>`;
+    this.els.tooltipDesc.innerHTML = `<span class="tooltip-rarity" style="color:${rar.color}">${rar.label}${def.tier ? ' · Tier ' + def.tier : ''}</span><br>${def.desc || ''}`;
 
+    const TYPE_LABEL = { material:'Matériau', consumable:'Consommable', tool:'Outil', armor:'Armure', ammo:'Munition', structure:'Structure' };
+    const row = (k, v) => `<div class="tooltip-stat-row"><span class="tooltip-stat-key">${k}</span><span class="tooltip-stat-val">${v}</span></div>`;
     let statsHtml = '';
-    if (def.damage)  statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">Dégâts</span><span class="tooltip-stat-val">${def.damage}</span></div>`;
-    if (def.armor)   statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">Armure</span><span class="tooltip-stat-val">${def.armor}</span></div>`;
-    if (def.health)  statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">❤ Santé</span><span class="tooltip-stat-val">+${def.health}</span></div>`;
-    if (def.hunger)  statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">🍗 Faim</span><span class="tooltip-stat-val">+${def.hunger}</span></div>`;
-    if (def.stamina) statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">⚡ Endurance</span><span class="tooltip-stat-val">+${def.stamina}</span></div>`;
-    if (item.count > 1) statsHtml += `<div class="tooltip-stat-row"><span class="tooltip-stat-key">Quantité</span><span class="tooltip-stat-val">${item.count}</span></div>`;
+    if (def.type)       statsHtml += row('Type', TYPE_LABEL[def.type] || def.type);
+    if (def.damage)     statsHtml += row('⚔ Dégâts', def.damage);
+    if (def.armor)      statsHtml += row('🛡 Armure', def.armor);
+    if (def.range)      statsHtml += row('🎯 Portée', def.range);
+    if (def.durability) statsHtml += row('🔧 Durabilité', def.durability);
+    if (def.health)     statsHtml += row('❤ Santé', '+' + def.health);
+    if (def.hunger)     statsHtml += row('🍗 Faim', '+' + def.hunger);
+    if (def.stamina)    statsHtml += row('⚡ Endurance', '+' + def.stamina);
+    if (def.value)      statsHtml += row('💰 Valeur', def.value);
+    if (def.stack && def.stack > 1) statsHtml += row('📦 Pile max', def.stack);
+    if (item.count > 1) statsHtml += row('Quantité', item.count);
 
     this.els.tooltipStats.innerHTML = statsHtml;
     this.els.tooltip.style.display = 'block';
@@ -363,10 +381,12 @@ class UI {
       slot.innerHTML = `<span class="slot-num">${i === 9 ? 0 : i+1}</span>`;
 
       if (item) {
-        const icon = document.createElement('span');
-        icon.className = 'slot-icon';
-        icon.textContent = def?.icon || '📦';
-        slot.appendChild(icon);
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'slot-icon';
+        if (window.VCIcons) window.VCIcons.into(iconSpan, def?.iconKey || item.type, def?.icon || '📦', 'vc-icon');
+        else iconSpan.textContent = def?.icon || '📦';
+        slot.appendChild(iconSpan);
+        if (def?.rarity) slot.dataset.rarity = def.rarity; else delete slot.dataset.rarity;
 
         if (item.count > 1) {
           const cnt = document.createElement('span');
@@ -374,6 +394,8 @@ class UI {
           cnt.textContent = item.count;
           slot.appendChild(cnt);
         }
+      } else {
+        delete slot.dataset.rarity;
       }
 
       slot.classList.toggle('selected', i === selected);
@@ -396,10 +418,12 @@ class UI {
       slotEl.classList.toggle('selected-for-move', i === this._selectedInvSlot);
 
       if (item) {
-        const icon = document.createElement('span');
-        icon.className = 'slot-icon';
-        icon.textContent = def?.icon || '📦';
-        slotEl.appendChild(icon);
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'slot-icon';
+        if (window.VCIcons) window.VCIcons.into(iconSpan, def?.iconKey || item.type, def?.icon || '📦', 'vc-icon');
+        else iconSpan.textContent = def?.icon || '📦';
+        slotEl.appendChild(iconSpan);
+        if (def?.rarity) slotEl.dataset.rarity = def.rarity; else delete slotEl.dataset.rarity;
 
         const lbl = document.createElement('span');
         lbl.className = 'slot-label';
@@ -611,10 +635,27 @@ class UI {
   // ──────────────────────────────────────────
   // DAMAGE NUMBERS
   // ──────────────────────────────────────────
-  showDamageNumber(amount, isHeal = false) {
+  showStarving(active, hungerFrac = 1) {
+    let el = document.getElementById('starving-warning');
+    if (active) {
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'starving-warning';
+        el.textContent = '🍗 Affamé ! Mangez quelque chose';
+        document.body.appendChild(el);
+      }
+      el.style.display = 'block';
+    } else if (el) {
+      el.style.display = 'none';
+    }
+  }
+
+  showDamageNumber(amount, isHeal = false, cause = null) {
     const div = document.createElement('div');
     div.className = 'damage-number' + (isHeal ? ' heal' : '');
-    div.textContent = (isHeal ? '+' : '-') + amount;
+    const CAUSE_LABEL = { Famine: '🍗', Goblin: '⚔', Orc: '⚔', DarkKnight: '⚔', Chute: '🪂' };
+    const tag = cause && CAUSE_LABEL[cause] ? ' ' + CAUSE_LABEL[cause] : '';
+    div.textContent = (isHeal ? '+' : '-') + amount + tag;
     // Position near center of screen
     div.style.left = (window.innerWidth/2 + (Math.random()-0.5)*80) + 'px';
     div.style.top  = (window.innerHeight/2 + (Math.random()-0.5)*40) + 'px';

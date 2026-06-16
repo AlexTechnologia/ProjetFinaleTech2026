@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#2f5d3a"/><stop offset="1" stop-color="#16301f"/></linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="12" fill="url(#bg)" stroke="#0008" stroke-width="2"/>
+<rect x="4" y="4" width="56" height="26" rx="11" fill="#ffffff10"/>
+
+<ellipse cx="34" cy="30" rx="15" ry="12" fill="#8a4a26" stroke="#0006" stroke-width="2"/>
+<ellipse cx="34" cy="30" rx="15" ry="12" fill="none" stroke="#5a2e16" stroke-width="1.4"/>
+<rect x="40" y="38" width="5" height="16" rx="2.5" transform="rotate(-35 42 46)" fill="#f3ecd8" stroke="#cbbf9f" stroke-width="1.5"/></svg>

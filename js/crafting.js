@@ -271,6 +271,87 @@ const RECIPES = [
     toolStats: { damage: 25, toolType: 'bow', range: 15, durability: 80 },
     description: 'Attaque à distance — nécessite des flèches'
   },
+
+  // === FOURNAISE (or) ===
+  {
+    id: 'gold_bar',
+    name: "Lingot d'or",
+    icon: '🥇',
+    workstation: 'furnace',
+    ingredients: [{ type: 'gold_ore', count: 2 }, { type: 'coal', count: 1 }],
+    result: { type: 'gold_bar', count: 1 },
+    smeltTime: 5000,
+    description: "Minerai d'or fondu en lingot"
+  },
+
+  // === ENCLUME (armures) ===
+  {
+    id: 'leather_armor',
+    name: 'Armure en cuir',
+    icon: '🟫',
+    workstation: 'anvil',
+    ingredients: [{ type: 'leather', count: 8 }, { type: 'string', count: 4 }],
+    result: { type: 'leather_armor', count: 1 },
+    toolStats: { armor: 8, toolType: 'armor' },
+    description: 'Protection légère — réduit les dégâts de 8'
+  },
+  {
+    id: 'gold_armor',
+    name: 'Armure en or',
+    icon: '🛡️',
+    workstation: 'anvil',
+    ingredients: [{ type: 'gold_bar', count: 8 }, { type: 'leather', count: 4 }],
+    result: { type: 'gold_armor', count: 1 },
+    toolStats: { armor: 20, toolType: 'armor' },
+    description: 'Protection prestigieuse — réduit les dégâts de 20'
+  },
+
+  // === CONSTRUCTION (établi) ===
+  {
+    id: 'bed',
+    name: 'Lit',
+    icon: '🛏️',
+    workstation: 'workbench',
+    ingredients: [{ type: 'wood', count: 6 }, { type: 'leather', count: 3 }, { type: 'string', count: 2 }],
+    result: { type: 'bed', count: 1 },
+    description: 'Placez-le la nuit pour dormir jusqu’au matin'
+  },
+  {
+    id: 'chest',
+    name: 'Coffre',
+    icon: '🧰',
+    workstation: 'workbench',
+    ingredients: [{ type: 'wood', count: 8 }],
+    result: { type: 'chest', count: 1 },
+    description: 'Élément décoratif de rangement'
+  },
+  {
+    id: 'wood_wall',
+    name: 'Mur en bois',
+    icon: '🧱',
+    workstation: 'workbench',
+    ingredients: [{ type: 'wood', count: 4 }],
+    result: { type: 'wood_wall', count: 1 },
+    description: 'Bloc de construction défensif'
+  },
+  {
+    id: 'stone_wall',
+    name: 'Mur en pierre',
+    icon: '🧱',
+    workstation: 'workbench',
+    ingredients: [{ type: 'rock', count: 6 }],
+    result: { type: 'stone_wall', count: 1 },
+    description: 'Mur défensif très solide'
+  },
+  {
+    id: 'wood_door',
+    name: 'Porte en bois',
+    icon: '🚪',
+    workstation: 'workbench',
+    ingredients: [{ type: 'wood', count: 6 }, { type: 'string', count: 1 }],
+    result: { type: 'wood_door', count: 1 },
+    description: 'Entrée de votre abri'
+  },
 ];
 
 // Stats des consommables trouvés dans le monde
@@ -278,9 +359,9 @@ const CONSUMABLE_EFFECTS = {
   pink_shroom:  { stamina: 30, description: 'Champignon rose — restaure 30 endurance' },
   red_shroom:   { health: 30, description: 'Champignon rouge — restaure 30 vie' },
   yellow_shroom:{ hunger: 30, description: 'Champignon jaune — restaure 30 faim' },
-  ligon_shroom: { hunger: 10, description: 'Champignon ligon — restaure 10 faim' },
   bread:        { hunger: 40, health: 10, description: 'Pain — restaure 40 faim et 10 vie' },
   soup:         { hunger: 60, health: 30, stamina: 20, description: 'Soupe — restaure tout' },
+  berries:      { hunger: 10, health: 3, description: 'Baies — restaure 10 faim et 3 vie' },
 };
 
 // Stats des outils (dégâts, type, etc.)
@@ -300,12 +381,19 @@ const TOOL_STATS = {
   gold_sword:     { damage: 45, toolType: 'sword',   durability: 120 },
   bow:            { damage: 25, toolType: 'bow',      range: 15, durability: 80 },
   iron_armor:     { armor: 15,  toolType: 'armor' },
+  leather_armor:  { armor: 8,   toolType: 'armor' },
+  gold_armor:     { armor: 20,  toolType: 'armor' },
   campfire:       { toolType: 'structure' },
   workbench:      { toolType: 'structure' },
   furnace:        { toolType: 'structure' },
   anvil:          { toolType: 'structure' },
   fletching_table:{ toolType: 'structure' },
   cauldron:       { toolType: 'structure' },
+  bed:            { toolType: 'structure' },
+  chest:          { toolType: 'structure' },
+  wood_wall:      { toolType: 'structure' },
+  stone_wall:     { toolType: 'structure' },
+  wood_door:      { toolType: 'structure' },
 };
 
 class CraftingSystem {
