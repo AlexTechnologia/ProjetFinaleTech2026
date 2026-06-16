@@ -63,11 +63,26 @@
           try {
             const scene = gltf.scene || (gltf.scenes && gltf.scenes[0]);
             if (!scene) { done(false); return; }
+            // glTF materials default to metalness=1, which renders pitch black
+            // without a reflection environment. Force metalness off on EVERY
+            // material (including material arrays used by the characters), and
+            // give untextured materials a faint self-glow so they read at night.
+            const fixMat = (m) => {
+              if (!m) return;
+              if (m.metalness !== undefined) m.metalness = 0;
+              if (m.roughness !== undefined && m.roughness > 0.95) m.roughness = 0.85;
+              if (!m.map && m.color && m.emissive && m.emissiveIntensity !== undefined) {
+                m.emissive.copy(m.color);
+                m.emissiveIntensity = 0.2;
+              }
+              m.needsUpdate = true;
+            };
             scene.traverse((o) => {
               if (o.isMesh || o.isSkinnedMesh) {
                 o.castShadow = true;
                 o.frustumCulled = true;
-                if (o.material && o.material.metalness !== undefined) o.material.metalness = 0;
+                if (Array.isArray(o.material)) o.material.forEach(fixMat);
+                else fixMat(o.material);
               }
             });
             const box = new THREE.Box3().setFromObject(scene);
@@ -89,12 +104,13 @@
   async function preload(onProgress) {
     const keys = Object.keys(FILES);
     let done = 0, ok = 0;
-    for (const key of keys) {
+    // Load all models in parallel for a much faster boot.
+    await Promise.all(keys.map(async (key) => {
       const success = await loadOne(key);
       if (success) ok++;
       done++;
       if (onProgress) { try { onProgress(done / keys.length, key); } catch (e) {} }
-    }
+    }));
     console.log(`[Assets] preloaded ${ok}/${keys.length} models`);
     return ok;
   }

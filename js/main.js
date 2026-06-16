@@ -838,8 +838,8 @@ class VeilCraftGame {
     this._initScene();
     this._initSubsystems();
     this._setupInput();
-    this._initNetwork();
     await this._preloadAssets();
+    this._initNetwork();
     this._generateWorld();
     this._finalizeLoad();
     this._startLoop();
@@ -1156,7 +1156,8 @@ class VeilCraftGame {
   _handleMsg(type, data, fromId) {
     switch(type) {
       case MSG.WORLD_SYNC:
-        if (this.mode === 'join' && data) {
+        if (this.mode === 'join' && data && !this._worldSynced) {
+          this._worldSynced = true;
           this.seed = data.seed;
           this.world.generate(data.seed);
           if (data.worldData) this.world.deserialize(data.worldData);
@@ -1166,6 +1167,12 @@ class VeilCraftGame {
           this.dayTime   = data.dayTime   || 0;
           this.isNight   = data.isNight   || false;
           this.waveManager.dayNumber = this.dayNumber;
+          // Drop the player onto solid ground at the island centre so we don't
+          // spawn inside terrain or fall through the floor.
+          const gy = this.world.getHeightAt(0, 0);
+          this.player.position.set(0, (gy || 0) + 1.7, 0);
+          this.ui.setLoadingProgress(100, 'Prêt!');
+          console.log('[Game] Joined host world — seed', this.seed);
         }
         break;
       case MSG.PLAYER_UPDATE:
@@ -1251,6 +1258,26 @@ class VeilCraftGame {
 
   // ─── WORLD ──────────────────────────────────────
   _generateWorld() {
+    if (this.mode === 'join') {
+      // Joiner builds NOTHING from its own seed — it waits for the host's
+      // WORLD_SYNC so both clients share the exact same world (fixes the
+      // "my teammate is stuck inside a mountain" desync).
+      this.ui.setLoadingProgress(90, 'En attente de l\u2019hôte…');
+      this._resourceMeshes = this._resourceMeshes || new Map();
+      this.pigs = this.pigs || [];
+      // Safety net: if the host never syncs within 10s, build a local world
+      // so we are never stuck on the loading screen.
+      setTimeout(() => {
+        if (!this._worldSynced) {
+          console.warn('[Game] No host sync received — generating fallback world.');
+          this._worldSynced = true;
+          this.world.generate(this.seed);
+          this._buildTerrainMesh();
+          this._buildResourceMeshes();
+        }
+      }, 10000);
+      return;
+    }
     this.ui.setLoadingProgress(60, 'Génération du monde…');
     this.world.generate(this.seed);
 
@@ -1584,12 +1611,12 @@ class VeilCraftGame {
       else { sunInt = 0.8; ambInt = 0.4; }
       this.starField.visible = false;
     } else {
-      sunInt = 0; ambInt = 0.28; this.starField.visible = true;
+      sunInt = 0; ambInt = 0.5; this.starField.visible = true;
     }
 
     this.sunLight.intensity = sunInt;
     this.ambientLight.intensity = ambInt;
-    if (this._moonLight) this._moonLight.intensity = this.isNight ? 0.5 : 0.0;
+    if (this._moonLight) this._moonLight.intensity = this.isNight ? 0.85 : 0.0;
     this.scene.fog.density = this.isNight ? 0.010 : 0.008;
 
     // Sun/moon position
