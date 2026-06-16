@@ -850,8 +850,14 @@ function copyRoomCode() {
 // ─────────────────────────────────────────────────────────────────────────────
 // START HOST GAME
 // ─────────────────────────────────────────────────────────────────────────────
+function initHostPeer() {
+  // We no longer initialize PeerJS in index.html to avoid disconnects when transitioning.
+  // We just show the UI.
+  document.getElementById('host-status').textContent = "En attente de joueurs... (Rejoignez avec le code)";
+  document.getElementById('host-status').className = 'status-msg success';
+}
+
 function startHostGame() {
-  sessionStorage.setItem('vc_peer_id', currentPeer?.id || '');
   sessionStorage.setItem('vc_room', currentRoomCode);
   sessionStorage.setItem('vc_mode', 'host');
   sessionStorage.setItem('vc_name', localPlayerName);
@@ -884,63 +890,17 @@ function joinGame() {
     return;
   }
 
-  status.innerHTML = '<span class="spinner"></span> Connexion en cours…';
+  status.innerHTML = '<span class="spinner"></span> Connexion au lobby...';
   status.className = 'status-msg';
   spinner.style.display = 'inline';
 
-  // Quick test connection via PeerJS
-  const testPeer = new Peer(undefined, {
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:3478' },
-      ]
-    }
-  });
+  sessionStorage.setItem('vc_room', code);
+  sessionStorage.setItem('vc_mode', 'join');
+  sessionStorage.setItem('vc_name', name);
 
-  testPeer.on('open', myId => {
-    const conn = testPeer.connect('vc_' + code, {
-      metadata: { name },
-      reliable: true
-    });
-
-    const timeout = setTimeout(() => {
-      status.textContent = '⚠️ Hôte introuvable – vérifiez le code.';
-      status.className = 'status-msg error';
-      spinner.style.display = 'none';
-      testPeer.destroy();
-    }, 8000);
-
-    conn.on('open', () => {
-      clearTimeout(timeout);
-      spinner.style.display = 'none';
-      status.innerHTML = '✅ Connecté! Chargement…';
-      status.className = 'status-msg success';
-
-      sessionStorage.setItem('vc_peer_id', myId);
-      sessionStorage.setItem('vc_room', code);
-      sessionStorage.setItem('vc_mode', 'join');
-      sessionStorage.setItem('vc_name', name);
-
-      setTimeout(() => {
-        window.location.href = `game.html?mode=join&room=${code}`;
-      }, 600);
-    });
-
-    conn.on('error', () => {
-      clearTimeout(timeout);
-      status.textContent = '⚠️ Connexion refusée – vérifiez le code.';
-      status.className = 'status-msg error';
-      spinner.style.display = 'none';
-      testPeer.destroy();
-    });
-  });
-
-  testPeer.on('error', err => {
-    status.textContent = '⚠️ Erreur réseau.';
-    status.className = 'status-msg error';
-    spinner.style.display = 'none';
-  });
+  setTimeout(() => {
+    window.location.href = `game.html?mode=join&room=${code}`;
+  }, 400);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

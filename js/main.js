@@ -910,7 +910,9 @@ class VeilCraftGame {
     this.roomCode   = p.get('room') || sessionStorage.getItem('vc_room') || null;
     this.playerName = sessionStorage.getItem('vc_name') || 'Aventurier';
     const s         = sessionStorage.getItem('vc_seed');
-    this.seed       = s ? parseInt(s) : Math.floor(Math.random() * 999999) + 1;
+    let parsedSeed  = parseInt(s);
+    if (isNaN(parsedSeed)) parsedSeed = Math.floor(Math.random() * 999999) + 1;
+    this.seed       = parsedSeed;
     console.log(`[Game] mode=${this.mode} room=${this.roomCode} seed=${this.seed}`);
   }
 
@@ -1083,6 +1085,55 @@ class VeilCraftGame {
     this.scene.add(this._terrainMesh);
   }
 
+  _buildCaveTerrainMesh() {
+    if (this._caveFloorMesh) { this.scene.remove(this._caveFloorMesh); this._caveFloorMesh.geometry.dispose(); }
+    if (this._caveCeilMesh) { this.scene.remove(this._caveCeilMesh); this._caveCeilMesh.geometry.dispose(); }
+    
+    const seg = 100, sz = 350;
+    
+    // Cave Floor
+    let fGeo = new THREE.PlaneGeometry(sz, sz, seg, seg);
+    fGeo.rotateX(-Math.PI / 2);
+    const fPos = fGeo.attributes.position;
+    for (let i = 0; i < fPos.count; i++) {
+      const x = fPos.getX(i), z = fPos.getZ(i);
+      const y = this.world ? this.world.getCaveFloorAt(x, z) : -1000;
+      fPos.setY(i, y);
+    }
+    fGeo = fGeo.toNonIndexed();
+    fGeo.computeVertexNormals();
+    const fColors = new Float32Array(fGeo.attributes.position.count * 3);
+    for (let i = 0; i < fColors.length; i += 3) { fColors[i]=0.2; fColors[i+1]=0.2; fColors[i+2]=0.22; }
+    fGeo.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+    this._caveFloorMesh = new THREE.Mesh(fGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+    this.scene.add(this._caveFloorMesh);
+
+    // Cave Ceiling
+    let cGeo = new THREE.PlaneGeometry(sz, sz, seg, seg);
+    cGeo.rotateX(Math.PI / 2); // facing down
+    const cPos = cGeo.attributes.position;
+    for (let i = 0; i < cPos.count; i++) {
+      const x = cPos.getX(i), z = cPos.getZ(i);
+      const y = this.world ? this.world.getCaveCeilingAt(x, z) : -970;
+      cPos.setY(i, y);
+    }
+    cGeo = cGeo.toNonIndexed();
+    cGeo.computeVertexNormals();
+    const cColors = new Float32Array(cGeo.attributes.position.count * 3);
+    for (let i = 0; i < cColors.length; i += 3) { cColors[i]=0.15; cColors[i+1]=0.15; cColors[i+2]=0.17; }
+    cGeo.setAttribute('color', new THREE.BufferAttribute(cColors, 3));
+    this._caveCeilMesh = new THREE.Mesh(cGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1.0 }));
+    this.scene.add(this._caveCeilMesh);
+
+    // Cave Water
+    this._caveWaterMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(sz, sz).rotateX(-Math.PI/2),
+      new THREE.MeshLambertMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+    );
+    this._caveWaterMesh.position.y = -998.5; // Slightly above average floor
+    this.scene.add(this._caveWaterMesh);
+  }
+
   // ─── SUBSYSTEMS ─────────────────────────────────
   _initSubsystems() {
     this.ui = new UI();
@@ -1139,8 +1190,21 @@ class VeilCraftGame {
       if (e.code === 'KeyE' && !this.ui.chatOpen) {
         if (this.ui.inventoryOpen) { this.ui.closeInventory(); }
         else {
+          const special = this._getNearbySpecialResource();
           const ws = this._getNearbyWorkstation();
-          this.ui.openInventory(this.player, this.crafting, ws);
+          if (special === 'cave_entrance') {
+            this.player.position.y = this.world.getCaveFloorAt(this.player.position.x, this.player.position.z) + 1.7;
+            this.ui.showPickup('🌌 Entrée dans les profondeurs...');
+            if (window.audio) window.audio.playHitRock();
+          } else if (special === 'cave_exit') {
+            this.player.position.y = this.world.getHeightAt(this.player.position.x, this.player.position.z) + 1.7;
+            this.ui.showPickup('☀️ Retour à la surface...');
+            if (window.audio) window.audio.playHitRock();
+          } else if (ws === 'bed') {
+            this._sleep();
+          } else {
+            this.ui.openInventory(this.player, this.crafting, ws);
+          }
         }
         e.preventDefault();
       }
@@ -1173,6 +1237,7 @@ class VeilCraftGame {
       this.remotePlayers.set(peerId, { name, color, ping: 0, mesh: this._buildRemotePlayerMesh(color, name || (peerId ? peerId.substring(0, 8) : 'Joueur')) });
       this.ui.addChatMessage('Système', `${name || peerId.substring(0,8)} a rejoint!`, '#86efac');
       this._updatePlayerTab();
+      this._updateLobbyPlayers();
     };
 
     this.network.onPlayerLeft = (peerId) => {
@@ -1181,6 +1246,7 @@ class VeilCraftGame {
       this.remotePlayers.delete(peerId);
       this.ui.addChatMessage('Système', 'Un joueur a quitté.', '#fca5a5');
       this._updatePlayerTab();
+      this._updateLobbyPlayers();
     };
 
     this.network.onMessage = (type, data, fromId) => this._handleMsg(type, data, fromId);
@@ -1201,6 +1267,9 @@ class VeilCraftGame {
 
   _handleMsg(type, data, fromId) {
     switch(type) {
+      case '__START_GAME__':
+        this._beginGameFromLobby();
+        break;
       case MSG.WORLD_SYNC:
         if (this.mode === 'join' && data && !this._worldSynced) {
           this._worldSynced = true;
@@ -1208,6 +1277,7 @@ class VeilCraftGame {
           this.world.generate(data.seed);
           if (data.worldData) this.world.deserialize(data.worldData);
           this._buildTerrainMesh();
+          this._buildCaveTerrainMesh();
           this._buildResourceMeshes();
           this.dayNumber = data.dayNumber || 1;
           this.dayTime   = data.dayTime   || 0;
@@ -1338,6 +1408,7 @@ class VeilCraftGame {
 
     this.ui.setLoadingProgress(75, 'Construction du terrain…');
     this._buildTerrainMesh();
+    this._buildCaveTerrainMesh();
 
     this.ui.setLoadingProgress(85, 'Placement des ressources…');
     this._buildResourceMeshes();
@@ -1482,6 +1553,24 @@ class VeilCraftGame {
         }
         break;
       }
+      case 'cave_entrance': {
+        const frame = new THREE.Mesh(new THREE.TorusGeometry(1*s, 0.2*s, 8, 16), mat(0x444444));
+        frame.rotation.x = -Math.PI / 2; frame.position.y = 0.1*s; g.add(frame);
+        const hole = new THREE.Mesh(new THREE.CircleGeometry(1*s, 16), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+        hole.rotation.x = -Math.PI / 2; hole.position.y = 0.05*s; g.add(hole);
+        const light = new THREE.PointLight(0xa78bfa, 0.8, 10);
+        light.position.y = 2*s; g.add(light);
+        break;
+      }
+      case 'cave_exit': {
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.2*s, 1.2*s, 0.2*s, 16), mat(0x222222));
+        pad.position.y = 0.1*s; g.add(pad);
+        const glow = new THREE.Mesh(new THREE.CylinderGeometry(1*s, 1*s, 0.22*s, 16), new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.5 }));
+        glow.position.y = 0.1*s; g.add(glow);
+        const light = new THREE.PointLight(0xa78bfa, 1.5, 15);
+        light.position.y = 2*s; g.add(light);
+        break;
+      }
       default: {
         const def = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), mat(0xAAAAAA));
         def.position.y = 0.2; g.add(def);
@@ -1513,7 +1602,20 @@ class VeilCraftGame {
     this.ui.setLoadingProgress(100, 'Prêt!');
     setTimeout(() => this.ui.hideLoadingScreen(), 600);
     this.isRunning = true;
-    this.ui.showClickToPlay();
+    
+    if (this.mode === 'host' || this.mode === 'join') {
+      this.isLobby = true;
+      const overlay = document.getElementById('lobby-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        document.getElementById('lobby-room-code').textContent = 'Salle: ' + this.roomCode;
+        if (this.mode === 'host') document.getElementById('lobby-host-controls').style.display = 'block';
+        else document.getElementById('lobby-join-controls').style.display = 'block';
+      }
+      this._updateLobbyPlayers();
+    } else {
+      this.ui.showClickToPlay();
+    }
     this.ui.setConnectionStatus('online', this.mode === 'solo' ? 'Solo' : `Salle: ${this.roomCode}`);
     this._updatePlayerTab();
 
@@ -1541,7 +1643,7 @@ class VeilCraftGame {
       requestAnimationFrame(loop);
       const dt = Math.min((ts - this.lastTime) / 1000, 0.1);
       this.lastTime = ts;
-      if (this.isRunning && !this.isPaused) this._update(dt, ts);
+      if (this.isRunning && !this.isPaused && !this.isLobby) this._update(dt, ts);
       else if (this.player?.isDead) {
         this.player.update(dt, (x, z) => this.world ? this.world.getHeightAt(x, z) : 0);
         this.ui.updateDeathCountdown(this.player.respawnTimer);
@@ -1553,10 +1655,36 @@ class VeilCraftGame {
     requestAnimationFrame(loop);
   }
 
+  startMultiplayerGame() {
+    if (this.mode !== 'host') return;
+    this.network.broadcast('__START_GAME__', {});
+    this._beginGameFromLobby();
+  }
+
+  _beginGameFromLobby() {
+    this.isLobby = false;
+    const overlay = document.getElementById('lobby-overlay');
+    if (overlay) overlay.style.display = 'none';
+    this.ui.showClickToPlay();
+  }
+
+  _updateLobbyPlayers() {
+    const list = document.getElementById('lobby-player-list');
+    if (!list) return;
+    let html = `<div style="padding:0.5rem 1rem; background:rgba(255,255,255,0.1); border-radius:8px; border:1px solid #7c3aed;">👑 ${this.playerName || 'Hôte'}</div>`;
+    if (this.remotePlayers) {
+      this.remotePlayers.forEach((p, id) => {
+        html += `<div style="padding:0.5rem 1rem; background:rgba(255,255,255,0.1); border-radius:8px; border:1px solid rgba(255,255,255,0.2);">${p.name || id.substring(0,8)}</div>`;
+      });
+    }
+    list.innerHTML = html;
+  }
+
   _update(dt, ts) {
     // Player
     this.player.update(dt, (x, z) => this.world ? this.world.getHeightAt(x, z) : 0);
     this.ui.updateHUD(this.player);
+    this._updateMinimap();
 
     // Day/night cycle
     this._updateDayNight(dt);
@@ -1624,9 +1752,14 @@ class VeilCraftGame {
 
     // Workstation Prompt
     const ws = this._getNearbyWorkstation();
-    if (ws && this.ui.els.interactPrompt && !this.ui.inventoryOpen) {
+    const special = this._getNearbySpecialResource();
+    if ((ws || special) && this.ui.els.interactPrompt && !this.ui.inventoryOpen) {
       this.ui.els.interactPrompt.style.display = 'block';
-      this.ui.els.interactText.textContent = `[E] Utiliser ${(window.ITEM_DB && window.ITEM_DB[ws] && window.ITEM_DB[ws].name) || String(ws).replace(/_/g, ' ')}`;
+      if (special) {
+        this.ui.els.interactText.textContent = special === 'cave_entrance' ? '[E] Entrer dans la grotte' : '[E] Sortir de la grotte';
+      } else {
+        this.ui.els.interactText.textContent = `[E] Utiliser ${(window.ITEM_DB && window.ITEM_DB[ws] && window.ITEM_DB[ws].name) || String(ws).replace(/_/g, ' ')}`;
+      }
     } else if (this.ui.els.interactPrompt) {
       this.ui.els.interactPrompt.style.display = 'none';
     }
@@ -1647,6 +1780,55 @@ class VeilCraftGame {
       this.syncTimer = 0;
       const pd = this.player.getData();
       this.network.broadcast(MSG.PLAYER_UPDATE, { x: pd.pos.x, y: pd.pos.y, z: pd.pos.z, yaw: pd.yaw });
+    }
+  }
+
+  _updateMinimap() {
+    const canvas = document.getElementById('minimap-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    
+    // Scale and center around player
+    const scale = 2.0; // zoom level
+    const px = this.player.position.x;
+    const pz = this.player.position.z;
+    
+    // Helper to draw circle
+    const drawDot = (wx, wz, color, size) => {
+      const sx = w/2 + (wx - px) * scale;
+      const sy = h/2 + (wz - pz) * scale;
+      if (sx < -10 || sx > w+10 || sy < -10 || sy > h+10) return;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI*2);
+      ctx.fill();
+    };
+
+    // Draw resources (green for trees, gray for rocks, orange for ores)
+    if (this.world && this.world.resources) {
+      for (const res of this.world.resources.values()) {
+        let col = '#22c55e'; // default green
+        if (res.type.includes('rock') || res.type.includes('stone') || res.type === 'FLINT_NODE' || res.type === 'ROCK') col = '#6b7280';
+        else if (res.type === 'IRON_ORE' || res.type === 'GOLD_ORE') col = '#f59e0b';
+        drawDot(res.position.x, res.position.z, col, 2);
+      }
+    }
+
+    // Draw enemies (red)
+    if (this.waveManager && this.waveManager.enemies) {
+      for (const e of this.waveManager.enemies) {
+        drawDot(e.position.x, e.position.z, '#ef4444', 3);
+      }
+    }
+
+    // Draw peers (blue)
+    if (this.remotePlayers) {
+      for (const p of this.remotePlayers.values()) {
+        if (p.mesh) drawDot(p.mesh.position.x, p.mesh.position.z, '#3b82f6', 3);
+      }
     }
   }
 
@@ -1905,6 +2087,20 @@ class VeilCraftGame {
     return this.world.getNearbyWorkstation(pp, 4);
   }
 
+  _getNearbySpecialResource() {
+    if (!this.world || !this.world.resources) return null;
+    let closest = null;
+    let minDist = 4;
+    const px = this.player.position.x, py = this.player.position.y, pz = this.player.position.z;
+    this.world.resources.forEach(res => {
+      if (res.type === 'cave_entrance' || res.type === 'cave_exit') {
+        const d = Math.hypot(res.position.x - px, (res.position.y||0) - py, res.position.z - pz);
+        if (d < minDist) { minDist = d; closest = res.type; }
+      }
+    });
+    return closest;
+  }
+
   _placeStructure() {
     const item = this.player.inventory.getSelectedItem();
     if (!item) return;
@@ -1925,28 +2121,51 @@ class VeilCraftGame {
 
   // Skip the night by sleeping in a bed. Host-authoritative in multiplayer.
   _sleep() {
-    if (!this.isNight) { this.ui.showPickup("\ud83d\udecf\ufe0f Vous ne pouvez dormir que la nuit"); return; }
+    this.player.respawnPoint = { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z };
+
+    if (!this.isNight) { this.ui.showPickup("\ud83d\udecf\ufe0f Point de réapparition défini"); return; }
     if (this.network && this.network.isHost === false && !this.network.isSolo()) {
-      this.ui.showPickup("\ud83d\udecf\ufe0f Seul l\u2019h\u00f4te peut faire passer la nuit"); return;
+      this.ui.showPickup("\ud83d\udecf\ufe0f Point de réapparition défini (Seul l\u2019h\u00f4te passe la nuit)"); return;
     }
-    this.dayTime = 0;
-    this.isNight = false;
-    if (this.waveManager) { this.waveManager.isNight = false; this.waveManager.clearEnemies(); }
-    if (this.player) {
-      this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
-      this.player.stamina = this.player.maxStamina;
+    
+    // Create sleep fade element if not exists
+    let fade = document.getElementById('sleep-fade');
+    if (!fade) {
+      fade = document.createElement('div');
+      fade.id = 'sleep-fade';
+      fade.style.position = 'fixed'; fade.style.top = '0'; fade.style.left = '0';
+      fade.style.width = '100vw'; fade.style.height = '100vh';
+      fade.style.backgroundColor = 'black'; fade.style.zIndex = '9999';
+      fade.style.opacity = '0'; fade.style.transition = 'opacity 2s ease-in-out';
+      fade.style.pointerEvents = 'none';
+      document.body.appendChild(fade);
     }
-    if (window.audio && window.audio.playDayStart) window.audio.playDayStart();
-    this.ui.showPickup("\ud83c\udf05 Vous avez dormi jusqu\u2019au matin");
+    
+    // Trigger animation
+    setTimeout(() => { fade.style.opacity = '1'; }, 10);
+    
+    setTimeout(() => {
+      this.dayTime = 0;
+      this.isNight = false;
+      if (this.waveManager) { this.waveManager.isNight = false; this.waveManager.clearEnemies(); }
+      if (this.player) {
+        this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
+        this.player.stamina = this.player.maxStamina;
+      }
+      if (window.audio && window.audio.playDayStart) window.audio.playDayStart();
+      this.ui.showPickup("\ud83c\udf05 Point de réapparition défini. Vous avez dormi jusqu\u2019au matin");
+      
+      setTimeout(() => { fade.style.opacity = '0'; }, 1000);
+    }, 2000);
   }
 
   _placeWorkstationMesh(type, pos) {
-    const COLORS = { campfire:0xFF6600, workbench:0x8B4513, furnace:0xFF4500, anvil:0x555555, cauldron:0x336699, fletching_table:0x8B6914 };
+    const COLORS = { campfire:0xFF6600, workbench:0x8B4513, furnace:0xFF4500, anvil:0x555555, cauldron:0x336699, fletching_table:0x8B6914, chest:0x6b4226, bed:0xff4444 };
     const color = COLORS[type] || 0xAAAAAA;
     const g = new THREE.Group();
     // Real model first; fall back to the procedural box below.
     const tkey = String(type).toLowerCase().replace(/ /g, '_');
-    const _wsHeight = { campfire:0.8, workbench:1.1, furnace:1.3, anvil:0.9, cauldron:1.0, fletching_table:1.1 }[tkey] || 1.0;
+    const _wsHeight = { campfire:0.8, workbench:1.1, furnace:1.3, anvil:0.9, cauldron:1.0, fletching_table:1.1, chest:0.8, bed:0.6 }[tkey] || 1.0;
     if (window.VCAssets && window.VCAssets.has(tkey)) {
       const built = window.VCAssets.buildModel(tkey, _wsHeight);
       if (built) {
@@ -1959,13 +2178,28 @@ class VeilCraftGame {
         return g;
       }
     }
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.8), new THREE.MeshLambertMaterial({ color }));
-    box.position.y = 0.35; box.castShadow = true; g.add(box);
-    if (type === 'campfire') {
-      const fl = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xFF6600 }));
-      fl.position.y = 0.6; g.add(fl);
-      const pl = new THREE.PointLight(0xFF6600, 1.5, 8); pl.position.y = 0.7; g.add(pl);
+    
+    // Fallback meshes
+    if (type === 'chest') {
+      const b1 = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.6), new THREE.MeshLambertMaterial({ color }));
+      b1.position.y = 0.3; b1.castShadow = true; g.add(b1);
+      const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
+      b2.position.set(0, 0.3, 0.3); g.add(b2);
+    } else if (type === 'bed') {
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, 1.0), new THREE.MeshLambertMaterial({ color }));
+      p1.position.y = 0.15; p1.castShadow = true; g.add(p1);
+      const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.8), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+      p2.position.set(-0.6, 0.3, 0); g.add(p2);
+    } else {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.8), new THREE.MeshLambertMaterial({ color }));
+      box.position.y = 0.35; box.castShadow = true; g.add(box);
+      if (type === 'campfire') {
+        const fl = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xFF6600 }));
+        fl.position.y = 0.6; g.add(fl);
+        const pl = new THREE.PointLight(0xFF6600, 1.5, 8); pl.position.y = 0.7; g.add(pl);
+      }
     }
+    
     g.position.set(pos.x, pos.y || 0, pos.z);
     this.scene.add(g);
   }
