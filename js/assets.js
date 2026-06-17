@@ -137,8 +137,11 @@
     if (!entry) return null;
     try {
       const obj = cloneScene(entry);
-      const box = new THREE.Box3().setFromObject(obj);
-      const height = Math.max(0.01, box.max.y - box.min.y);
+      
+      // Use pre-computed bounding box properties from load time!
+      // Cloning (especially with SkeletonUtils) doesn't always preserve world matrices immediately,
+      // which would result in Infinity bounds and microscopic/infinite scaling.
+      const height = Math.max(0.01, entry.height);
       const s = targetHeight ? (targetHeight / height) : 1;
 
       // Wrap the object to preserve its original scale/rotation
@@ -147,7 +150,7 @@
       
       pivot.add(obj);
       // Shift pivot so the bottom of the bounding box is at Y=0 locally
-      pivot.position.y = -box.min.y;
+      pivot.position.y = -entry.minY;
       
       wrapper.add(pivot);
       wrapper.scale.setScalar(s);

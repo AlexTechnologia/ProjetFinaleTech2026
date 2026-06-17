@@ -1682,7 +1682,7 @@ class VeilCraftGame {
 
   _update(dt, ts) {
     // Player
-    this.player.update(dt, (x, z) => this.world ? this.world.getHeightAt(x, z) : 0);
+    this.player.update(dt, this.world);
     this.ui.updateHUD(this.player);
     this._updateMinimap();
 
