@@ -137,10 +137,22 @@
     if (!entry) return null;
     try {
       const obj = cloneScene(entry);
-      const s = targetHeight ? (targetHeight / entry.height) : 1;
-      obj.scale.setScalar(s);
-      obj.position.y = -entry.minY * s; // drop feet/base to y=0
-      return { object: obj, animations: entry.animations, scale: s };
+      const box = new THREE.Box3().setFromObject(obj);
+      const height = Math.max(0.01, box.max.y - box.min.y);
+      const s = targetHeight ? (targetHeight / height) : 1;
+
+      // Wrap the object to preserve its original scale/rotation
+      const pivot = new THREE.Group();
+      const wrapper = new THREE.Group();
+      
+      pivot.add(obj);
+      // Shift pivot so the bottom of the bounding box is at Y=0 locally
+      pivot.position.y = -box.min.y;
+      
+      wrapper.add(pivot);
+      wrapper.scale.setScalar(s);
+
+      return { object: wrapper, animations: entry.animations, scale: s };
     } catch (e) {
       console.warn('[Assets] build fail', key, e);
       return null;

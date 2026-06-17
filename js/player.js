@@ -580,53 +580,67 @@ class Player {
 
     // Base hand (Player skin)
     const handMat = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.8 });
-    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.25), handMat);
-    hand.position.set(-0.05, -0.1, 0);
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), handMat);
+    
+    // Position hand in bottom right of view
+    // The toolGroup itself is moved during swing animations
+    hand.position.set(0.3, -0.3, -0.2); 
+    // Rotate arm slightly inward
+    hand.rotation.y = -0.2;
+    hand.rotation.x = 0.2;
     this.toolGroup.add(hand);
 
     if (type === 'Fists') return;
 
     // Material colors
     let headColor = 0x888888;
-    if (type.includes('Wood')) headColor = 0x8b4513;
-    else if (type.includes('Stone') || type.includes('Rock')) headColor = 0x666666;
-    else if (type.includes('Iron')) headColor = 0xaaaaaa;
-    else if (type.includes('Steel')) headColor = 0xc0c0c0;
-    else if (type.includes('Gold')) headColor = 0xffd700;
+    const typeStr = String(type).toLowerCase();
+    if (typeStr.includes('wood')) headColor = 0x8b4513;
+    else if (typeStr.includes('stone') || typeStr.includes('rock')) headColor = 0x666666;
+    else if (typeStr.includes('iron')) headColor = 0xaaaaaa;
+    else if (typeStr.includes('steel')) headColor = 0xc0c0c0;
+    else if (typeStr.includes('gold')) headColor = 0xffd700;
 
     const stickMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
-    const headMat = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.6, metalness: type.includes('Wood')?0:0.4 });
+    const headMat = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.6, metalness: typeStr.includes('wood')?0:0.4 });
 
-    if (type.includes('Pickaxe')) {
+    const toolRoot = new THREE.Group();
+    // Attach tool exactly to the hand's end
+    toolRoot.position.set(0.3, -0.3, -0.4);
+    toolRoot.rotation.copy(hand.rotation);
+
+    if (typeStr.includes('pickaxe')) {
       const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8), stickMat);
       handle.rotation.x = Math.PI / 2; handle.position.z = -0.2;
-      this.toolGroup.add(handle);
+      toolRoot.add(handle);
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.08), headMat);
       head.position.set(0, 0, -0.5);
-      this.toolGroup.add(head);
-    } else if (type.includes('Axe')) {
+      toolRoot.add(head);
+    } else if (typeStr.includes('axe')) {
       const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.7), stickMat);
       handle.rotation.x = Math.PI / 2; handle.position.z = -0.15;
-      this.toolGroup.add(handle);
+      toolRoot.add(handle);
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.25, 0.3), headMat);
       head.position.set(0.1, 0, -0.4);
-      this.toolGroup.add(head);
-    } else if (type.includes('Sword')) {
+      toolRoot.add(head);
+    } else if (typeStr.includes('sword')) {
       const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3), stickMat);
       handle.rotation.x = Math.PI / 2; handle.position.z = 0;
-      this.toolGroup.add(handle);
+      toolRoot.add(handle);
       const guard = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.06), headMat);
       guard.position.set(0, 0, -0.15);
-      this.toolGroup.add(guard);
+      toolRoot.add(guard);
       const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.8), headMat);
       blade.position.set(0, 0, -0.55);
-      this.toolGroup.add(blade);
+      toolRoot.add(blade);
     } else {
-      // Generic item
+      // Generic item box held in hand
       const itemBox = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), headMat);
-      itemBox.position.z = -0.2;
-      this.toolGroup.add(itemBox);
+      itemBox.position.z = -0.1;
+      toolRoot.add(itemBox);
     }
+    
+    this.toolGroup.add(toolRoot);
   }
 
   _doAttack() {
