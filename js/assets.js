@@ -88,7 +88,7 @@
             scene.traverse((o) => {
               if (o.isMesh || o.isSkinnedMesh) {
                 o.castShadow = true;
-                o.frustumCulled = true;
+                o.frustumCulled = false;
                 if (Array.isArray(o.material)) o.material.forEach(fixMat);
                 else fixMat(o.material);
               }

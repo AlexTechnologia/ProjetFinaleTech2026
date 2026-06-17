@@ -1862,9 +1862,9 @@ class VeilCraftGame {
     if (!this.isNight) {
       const td = t / dayFrac;
       let s = 1.0;
-      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.8; ambInt = s * 0.4 + 0.1; }
-      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.8; ambInt = s * 0.3 + 0.1; }
-      else { sunInt = 0.8; ambInt = 0.4; }
+      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.8; ambInt = s * 0.3 + 0.5; }
+      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.8; ambInt = s * 0.3 + 0.5; }
+      else { sunInt = 0.8; ambInt = 0.8; }
       this.starField.visible = false;
     } else {
       sunInt = 0; ambInt = 0.5; this.starField.visible = true;
@@ -2090,7 +2090,7 @@ class VeilCraftGame {
   _getNearbySpecialResource() {
     if (!this.world || !this.world.resources) return null;
     let closest = null;
-    let minDist = 4;
+    let minDist = 6;
     const px = this.player.position.x, py = this.player.position.y, pz = this.player.position.z;
     this.world.resources.forEach(res => {
       if (res.type === 'cave_entrance' || res.type === 'cave_exit') {

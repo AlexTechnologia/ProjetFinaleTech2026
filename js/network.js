@@ -69,8 +69,11 @@ class Network {
     const peerId = (mode === 'host') ? 'vc_' + roomId : undefined;
     
     this.peer = new Peer(peerId, {
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
       config: { iceServers: ICE_SERVERS },
-      debug: 0,
+      debug: 1,
     });
 
     this.peer.on('open', (id) => {

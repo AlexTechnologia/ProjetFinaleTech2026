@@ -362,25 +362,41 @@ class EntityManager {
 
   _createRemotePlayer(peerId, name) {
     const group = new THREE.Group();
+    const matBody = this._getMat(0x4f46e5);
+    const matSkin = this._getMat(0xfcd34d);
+    const matPants = this._getMat(0x1e3a8a);
 
-    // Body (capsule approximation: cylinder + 2 spheres)
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.3, 1.2, 8),
-      this._getMat(0x4f46e5)
-    );
-    body.position.y = 0.9;
-    group.add(body);
+    // Torso
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.4), matBody);
+    torso.position.y = 1.0;
+    torso.castShadow = true;
+    group.add(torso);
 
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 8, 6),
-      this._getMat(0xfcd34d)
-    );
-    head.position.y = 1.8;
+    // Head
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), matSkin);
+    head.position.y = 1.55;
+    head.castShadow = true;
     group.add(head);
+
+    // Legs
+    for (let s of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.3), matPants);
+      leg.position.set(s * 0.15, 0.35, 0);
+      leg.castShadow = true;
+      group.add(leg);
+    }
+
+    // Arms
+    for (let s of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.25), matSkin);
+      arm.position.set(s * 0.45, 1.0, 0);
+      arm.castShadow = true;
+      group.add(arm);
+    }
 
     // Name tag (canvas texture)
     const nameTag = this._createNameTag(name);
-    nameTag.position.y = 2.3;
+    nameTag.position.y = 2.1;
     group.add(nameTag);
 
     this.scene.add(group);
@@ -607,34 +623,43 @@ class Enemy {
   _buildMesh() {
     const [w, h, d] = this.def.size;
     const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: this.def.color });
+    const matDark = new THREE.MeshLambertMaterial({ color: 0x222222 });
 
-    // Body
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(w*2, h, d*2),
-      new THREE.MeshLambertMaterial({ color: this.def.color })
-    );
-    body.position.y = h / 2;
-    body.castShadow = true;
-    group.add(body);
+    // Torso
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(w*1.8, h*0.4, d*1.2), mat);
+    torso.position.y = h*0.5 + h*0.2;
+    torso.castShadow = true;
+    group.add(torso);
 
     // Head
-    const headSize = Math.min(w, d) * 1.8;
-    const head = new THREE.Mesh(
-      new THREE.BoxGeometry(headSize, headSize, headSize),
-      new THREE.MeshLambertMaterial({ color: this.def.color })
-    );
-    head.position.y = h + headSize * 0.5;
+    const headSize = Math.min(w, d) * 1.5;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(headSize, headSize, headSize), mat);
+    head.position.y = h*0.5 + h*0.4 + headSize*0.5;
     head.castShadow = true;
     group.add(head);
 
     // Eyes
     for (let s of [-1, 1]) {
-      const eye = new THREE.Mesh(
-        new THREE.SphereGeometry(headSize * 0.15, 4, 4),
-        new THREE.MeshBasicMaterial({ color: 0xff0000 })
-      );
-      eye.position.set(s * headSize * 0.28, h + headSize * 0.6, headSize * 0.45);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(headSize * 0.15, 4, 4), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+      eye.position.set(s * headSize * 0.25, head.position.y + headSize*0.1, headSize * 0.45);
       group.add(eye);
+    }
+
+    // Legs
+    for (let s of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(w*0.7, h*0.5, d*0.8), matDark);
+      leg.position.set(s * w*0.4, h*0.25, 0);
+      leg.castShadow = true;
+      group.add(leg);
+    }
+
+    // Arms
+    for (let s of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(w*0.6, h*0.45, d*0.6), mat);
+      arm.position.set(s * w*1.2, torso.position.y, 0);
+      arm.castShadow = true;
+      group.add(arm);
     }
 
     // Health bar (background)
@@ -900,16 +925,32 @@ class Pig {
     
     const matBody = new THREE.MeshLambertMaterial({color: 0xffb6c1});
     const matHead = new THREE.MeshLambertMaterial({color: 0xff69b4});
+    const matDark = new THREE.MeshLambertMaterial({color: 0x333333});
     
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1.2), matBody);
-    body.position.y = 0.4;
+    body.position.y = 0.5;
     body.castShadow = true;
     this.mesh.add(body);
     
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), matHead);
-    head.position.set(0, 0.65, 0.6);
+    head.position.set(0, 0.7, 0.7);
     head.castShadow = true;
     this.mesh.add(head);
+
+    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.2), matHead);
+    snout.position.set(0, 0.65, 0.98);
+    snout.castShadow = true;
+    this.mesh.add(snout);
+
+    // Legs
+    for (let x of [-0.3, 0.3]) {
+      for (let z of [-0.4, 0.4]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 0.2), matBody);
+        leg.position.set(x, 0.15, z);
+        leg.castShadow = true;
+        this.mesh.add(leg);
+      }
+    }
     
     this.mesh.position.copy(position);
     this.targetPos = position.clone();
