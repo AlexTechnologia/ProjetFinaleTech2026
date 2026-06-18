@@ -362,6 +362,27 @@ if (VCCaves && WORLD) {
   ok(connectedOk, 'every chamber is reachable from the entrance via tunnels');
   ok(formationsOk, 'formations reference valid chambers with positive size');
 
+  // ── Navigability invariants (fixes "caves are weird & hard to navigate"). ──
+  // Chambers need real standing headroom, but must stay BELOW the 12-unit
+  // "open" threshold so the head-clamp in main.js _move always treats them as
+  // enclosed rooms (a room that crept to >=12 headroom would let the player pop
+  // out through the ceiling). Tunnels must be wide enough to read and walk as
+  // corridors rather than the tight bores that felt claustrophobic.
+  let headroomOk = true, enclosedOk = true, corridorWidthOk = true;
+  for (const sys of a) {
+    for (const ch of sys.chambers) {
+      const h = ch.ceilY - ch.floorY;
+      if (!(h >= 6)) headroomOk = false;        // comfortable standing height
+      if (!(h < 12)) enclosedOk = false;         // still an enclosed room
+    }
+    for (const t of sys.tunnels) {
+      if (!(t.r >= 3.0)) corridorWidthOk = false; // walkable-width corridors
+    }
+  }
+  ok(headroomOk, 'every chamber has comfortable standing headroom (>= 6)');
+  ok(enclosedOk, 'every chamber stays an enclosed room (< 12) so the head-clamp engages');
+  ok(corridorWidthOk, 'every tunnel is a walkable-width corridor (radius >= 3.0)');
+
   // sampleCaves resolves to a chamber at a chamber centre.
   const ch0 = a[0].chambers[0];
   const env = VCCaves.sampleCaves(a, ch0.x, ch0.z);

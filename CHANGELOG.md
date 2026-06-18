@@ -2,6 +2,39 @@
 
 All notable changes to VeilCraft.
 
+## [4.1] — Cave readability & navigation polish
+
+Follow-up to the 4.0 cave rework, addressing live play-test feedback that the caves looked
+**brown** and felt **weird and hard to navigate**. The geometry from 4.0 was sound; the
+problems were lighting and proportions. Caves now read as bright, open, grey-stone caverns
+you can comfortably move through.
+
+### Fixed
+- **Rock looked muddy brown.** The only meaningful light underground was a strongly orange
+  head-torch (`0xffb169`) shining on near-black rock (`0x4a4658`), and the cave ambient was
+  crushed to near-zero (0.06) under heavy near-black fog — so everything turned brown and
+  murky. The torch is now **near-white** (`0xfff1e0`, longer reach), the rock is a lighter
+  **cool blue-grey stone** (`0xb0b4c4`), and underground ambient is a steady **cool fill**
+  (`0x6b76a0` @ 0.6) with lighter, cooler fog. Grey stone now reads as grey stone.
+- **Caves were hard to navigate.** Three causes, all fixed:
+  - **Too cramped** — main hall and satellite chambers are taller (≈7–10 of headroom) and
+    wider, and tunnels are now proper **walkable-width corridors** (radius ≈3.4–4.8, up from
+    ≈2.2–3.2).
+  - **Too dark to see across a room** — every chamber now gets its own **soft cool fill light**
+    so the whole room is readable, not just the torch cone in front of you.
+  - **Disorienting shapes** — wall/dome jitter was dialed way back (rough rock, not spiky
+    chaos), and tunnels are **trimmed to the chamber rims** with a **flat floor strip** so a
+    passage reads as a mouth in the wall instead of a lump poking into the room.
+- **Cave tint could leak onto the surface.** The cave ambient now resets to the surface tone
+  the moment you leave, so the overworld is never left with a cool cast.
+
+### Tests & docs
+- The headless suite grew to **896 assertions** — added **navigability invariants**: every
+  chamber has comfortable standing headroom (≥ 6) yet stays an enclosed room (< 12, so the
+  head-clamp still engages), and every tunnel is a walkable-width corridor (radius ≥ 3.0).
+- `tools/sim_cave.mjs` re-run against the roomier layout: 0 surface leaks, ingress/egress and
+  deepest-chamber traversal all pass.
+
 ## [4.0] — Walkable underground systems & live-build fixes
 
 This release rebuilds the cave entrance into a genuinely **walkable underground system** and

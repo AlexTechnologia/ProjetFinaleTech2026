@@ -128,8 +128,11 @@
       // — Main chamber, fed by a walkable ramp down from the surface —
       const baseFloor = -5 - rng() * 6;
       const chambers = [{
-        x: ex, z: ez, r: 7.5 + rng() * 4.5,
-        floorY: baseFloor, ceilY: baseFloor + 6 + rng() * 2.5,
+        x: ex, z: ez, r: 11 + rng() * 5,
+        // Tall, airy ceiling (≈7.5–10 headroom) so the main hall feels like a
+        // real cavern to move through, not a crawlspace — but still under the
+        // 12-unit "open" threshold so the head-clamp treats it as a sealed room.
+        floorY: baseFloor, ceilY: baseFloor + 7.5 + rng() * 2.5,
         depth: 0,
       }];
       const c0 = chambers[0];
@@ -154,13 +157,17 @@
         const cz = from.z + Math.sin(a) * d;
         // Deeper the further we branch from the surface.
         const cFloor = from.floorY - (1.5 + rng() * 4.5);
-        const cr = 5 + rng() * 4.5;
+        const cr = 8 + rng() * 5;
         const idx = chambers.push({
           x: cx, z: cz, r: cr,
-          floorY: cFloor, ceilY: cFloor + 4.5 + rng() * 2.5,
+          // Roomy satellite chambers (≈7–9.5 headroom) — comfortable to stand
+          // and walk in, still enclosed rooms (< 12) so the head-clamp engages.
+          floorY: cFloor, ceilY: cFloor + 7 + rng() * 2.5,
           depth: from.depth + 1,
         }) - 1;
-        tunnels.push({ a: parentIdx, b: idx, r: 2.2 + rng() * 1.0 });
+        // Wide corridors (≈3.4–4.8 radius) so tunnels read and walk as proper
+        // passages instead of the tight bores that felt claustrophobic.
+        tunnels.push({ a: parentIdx, b: idx, r: 3.4 + rng() * 1.4 });
       }
 
       const sys = {
@@ -209,7 +216,7 @@
         if (seg.dist < t.r) {
           const tf = A.floorY + (B.floorY - A.floorY) * seg.t;
           let tc = A.ceilY + (B.ceilY - A.ceilY) * seg.t;
-          if (tc < tf + 2.6) tc = tf + 2.6;
+          if (tc < tf + 3.8) tc = tf + 3.8;
           if (tf < floor) floor = tf;
           if (tc > ceil) ceil = tc;
           const m = 1 - seg.dist / t.r;

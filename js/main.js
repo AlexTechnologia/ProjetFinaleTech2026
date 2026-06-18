@@ -1131,7 +1131,7 @@ class VeilCraftGame {
 
     // Player head-torch: a warm point light that follows the camera and only
     // lights up when the player is underground in a real cave.
-    this.torchLight = new THREE.PointLight(0xffb169, 0.0, 20, 1.8);
+    this.torchLight = new THREE.PointLight(0xfff1e0, 0.0, 34, 1.2);
     this.torchLight.position.set(0, 1.6, 0);
     this.scene.add(this.torchLight);
     this._inCaveAtmosphere = false;
@@ -1833,10 +1833,16 @@ class VeilCraftGame {
     const systems = this.world && this.world.caveSystems ? this.world.caveSystems : [];
     if (!systems.length) { this.scene.add(this._caveGroup); return; }
 
-    const rockMat  = new THREE.MeshStandardMaterial({ color: 0x4a4658, roughness: 1.0, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x3a3742, roughness: 1.0, metalness: 0.0, flatShading: true });
+    // Cool blue-grey STONE. The per-chamber fill lights are a neutral cool tone
+    // and the head-torch is now near-white, so this grey reads as actual rock
+    // instead of the muddy brown produced when a strong orange torch was the
+    // only light source on near-black rock.
+    const rockMat  = new THREE.MeshStandardMaterial({ color: 0xb0b4c4, roughness: 0.95, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x8a8e9e, roughness: 1.0, metalness: 0.0, flatShading: true });
 
-    let crystalLightBudget = 6; // cap dynamic lights for performance
+    // Budget of dynamic lights (perf): a soft fill light per chamber plus a few
+    // coloured crystal glows, all drawn from this shared pool.
+    let lightBudget = 20;
 
     // Roughen a radial mesh (cylinder/dome/ring) so caves read as natural rock
     // rather than perfect geometric primitives. Purely visual — collision uses
@@ -1868,14 +1874,24 @@ class VeilCraftGame {
         floor.receiveShadow = true;
         this._caveGroup.add(floor);
 
-        // Wall: open tube around the chamber, vertices jittered so it reads as
-        // rough rock rather than a perfect cylinder.
+        // Wall: open tube around the chamber, vertices GENTLY jittered so it
+        // reads as rough rock — not the spiky, disorienting walls that heavy
+        // jitter produced (which made chambers hard to read and navigate).
         const wallH = Math.max(2.5, ch.ceilY - ch.floorY);
-        const wallGeo = new THREE.CylinderGeometry(ch.r, ch.r * 1.08, wallH, 28, 4, true);
-        roughen(wallGeo, 0.9);
+        const wallGeo = new THREE.CylinderGeometry(ch.r, ch.r * 1.06, wallH, 30, 4, true);
+        roughen(wallGeo, 0.4);
         const wall = new THREE.Mesh(wallGeo, rockMat);
         wall.position.set(ch.x, ch.floorY + wallH / 2, ch.z);
         this._caveGroup.add(wall);
+
+        // Soft neutral fill light per chamber so the WHOLE room is readable, not
+        // just the torch cone right in front of you — key to navigability.
+        if (lightBudget > 0) {
+          const fill = new THREE.PointLight(0x9fb0d8, 0.7, ch.r * 2.6, 1.5);
+          fill.position.set(ch.x, ch.floorY + wallH * 0.6, ch.z);
+          this._caveGroup.add(fill);
+          lightBudget--;
+        }
 
         if (isEntrance) {
           // Partial ring ceiling: leaves the centre open so daylight from the
@@ -1888,33 +1904,48 @@ class VeilCraftGame {
           this._caveGroup.add(ring);
         } else {
           // Full domed ceiling for satellite chambers (sealed underground).
-          const domeGeo = new THREE.SphereGeometry(ch.r, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-          roughen(domeGeo, 0.7);
+          const domeGeo = new THREE.SphereGeometry(ch.r, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2);
+          roughen(domeGeo, 0.38);
           const dome = new THREE.Mesh(domeGeo, rockMat);
           dome.position.set(ch.x, ch.ceilY, ch.z);
           this._caveGroup.add(dome);
         }
       });
 
-      // Tunnels: open bored cylinders linking chamber centres.
-      // t.a / t.b are INTEGER INDICES into sys.chambers, NOT chamber objects —
-      // resolving them is what previously produced NaN geometry.
+      // Tunnels: open bored corridors linking chambers. t.a / t.b are INTEGER
+      // INDICES into sys.chambers, NOT chamber objects — resolving them is what
+      // previously produced NaN geometry. The rendered bore is TRIMMED to the
+      // chamber rims so it reads as a passage mouth in each wall instead of a
+      // lump poking into the room, and gets a flat floor strip so the corridor
+      // looks like walkable ground.
+      const UP = new THREE.Vector3(0, 1, 0);
       (sys.tunnels || []).forEach(t => {
         const a = sys.chambers[t.a], b = sys.chambers[t.b];
         if (!a || !b) return;
-        // Run the bore at head height between the two chamber floors.
-        const ay = a.floorY + t.r, by = b.floorY + t.r;
-        const dx = b.x - a.x, dy = by - ay, dz = b.z - a.z;
+        const flatDx = b.x - a.x, flatDz = b.z - a.z;
+        const flat = Math.hypot(flatDx, flatDz) || 1e-6;
+        const ux = flatDx / flat, uz = flatDz / flat;
+        // Trim each end back to ~80% of the chamber radius.
+        const sx = a.x + ux * a.r * 0.8, sz = a.z + uz * a.r * 0.8, sFloor = a.floorY;
+        const ex2 = b.x - ux * b.r * 0.8, ez2 = b.z - uz * b.r * 0.8, eFloor = b.floorY;
+        // Bore centre runs at head height above the floor at each end.
+        const sy = sFloor + t.r, ey = eFloor + t.r;
+        const dx = ex2 - sx, dy = ey - sy, dz = ez2 - sz;
         const len = Math.hypot(dx, dy, dz);
-        if (!isFinite(len) || len < 0.1) return;
-        const tube = new THREE.Mesh(new THREE.CylinderGeometry(t.r, t.r, len, 14, 1, true), rockMat);
-        // Orient the cylinder (default +Y) along the segment direction.
-        const mid = new THREE.Vector3((a.x + b.x) / 2, (ay + by) / 2, (a.z + b.z) / 2);
-        tube.position.copy(mid);
+        if (!isFinite(len) || len < 0.5) return;
         const dirv = new THREE.Vector3(dx, dy, dz).normalize();
-        const up = new THREE.Vector3(0, 1, 0);
-        tube.quaternion.setFromUnitVectors(up, dirv);
+        // Rock bore.
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(t.r, t.r, len, 16, 1, true), rockMat);
+        tube.position.set((sx + ex2) / 2, (sy + ey) / 2, (sz + ez2) / 2);
+        tube.quaternion.setFromUnitVectors(UP, dirv);
         this._caveGroup.add(tube);
+        // Flat corridor floor strip (length along the bore, normal up).
+        const right = new THREE.Vector3().crossVectors(UP, dirv).normalize();
+        const upv = new THREE.Vector3().crossVectors(dirv, right).normalize();
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(t.r * 1.9, len), floorMat);
+        strip.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, dirv, upv));
+        strip.position.set((sx + ex2) / 2, (sFloor + eFloor) / 2 + 0.03, (sz + ez2) / 2);
+        this._caveGroup.add(strip);
       });
 
       // Stalagmites (floor) & stalactites (ceiling) for cave detail.
@@ -1934,20 +1965,20 @@ class VeilCraftGame {
       // Glowing crystals (emissive) — light a few of them for atmosphere.
       (sys.crystals || []).forEach((cr, idx) => {
         const hue = (cr.hue != null ? cr.hue : 0.55);
-        const col = new THREE.Color().setHSL(hue, 0.7, 0.55);
-        const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9, roughness: 0.4, metalness: 0.1, flatShading: true });
+        const col = new THREE.Color().setHSL(hue, 0.75, 0.58);
+        const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.2, roughness: 0.4, metalness: 0.1, flatShading: true });
         const geo = (idx % 2 === 0)
           ? new THREE.ConeGeometry(0.18, cr.h || 0.8, 6)
           : new THREE.IcosahedronGeometry((cr.h || 0.8) * 0.4, 0);
         const m = new THREE.Mesh(geo, mat);
         m.position.set(cr.x, cr.y + (cr.h || 0.8) * 0.5, cr.z);
         this._caveGroup.add(m);
-        if (!placedSystemLight && crystalLightBudget > 0) {
-          const pl = new THREE.PointLight(col.getHex(), 0.8, 9, 2);
+        if (!placedSystemLight && lightBudget > 0) {
+          const pl = new THREE.PointLight(col.getHex(), 1.0, 12, 2);
           pl.position.set(cr.x, cr.y + 0.8, cr.z);
           this._caveGroup.add(pl);
           placedSystemLight = true;
-          crystalLightBudget--;
+          lightBudget--;
         }
       });
     }
@@ -1976,16 +2007,28 @@ class VeilCraftGame {
     this.torchLight.position.set(this.camera.position.x, this.camera.position.y, this.camera.position.z);
     const inCave = !!this.player._inCave;
     // Smoothly ramp torch intensity so entering/leaving a cave isn't jarring.
-    const targetTorch = inCave ? 1.5 : 0.0;
+    const targetTorch = inCave ? 1.4 : 0.0;
     this.torchLight.intensity += (targetTorch - this.torchLight.intensity) * Math.min(1, dt * 6);
     if (inCave) {
       this.sunLight.intensity   *= 0.12;
-      this.ambientLight.intensity = Math.max(this.ambientLight.intensity * 0.25, 0.06);
+      // Strong, steady, cool-neutral ambient FILL so the whole chamber stays
+      // readable (not just the torch cone) — this is what makes caves navigable.
+      // The cool fill balances the near-white torch so the grey rock reads as
+      // grey STONE rather than the muddy brown / near-black it was before.
+      this.ambientLight.intensity = 0.6;
+      this.ambientLight.color.set(0x6b76a0);
       if (this.scene.fog) {
-        this.scene.fog.density = 0.06;
-        this.scene.fog.color.lerp(new THREE.Color(0x05060a), Math.min(1, dt * 4));
+        // Lighter haze + a cooler (less pure-black) fog so you can see across a
+        // chamber and actually navigate.
+        this.scene.fog.density = 0.022;
+        this.scene.fog.color.lerp(new THREE.Color(0x14161f), Math.min(1, dt * 4));
       }
       if (this.starField) this.starField.visible = false;
+    } else if (this._inCaveAtmosphere) {
+      // Just left a cave: restore the surface ambient tint (day/night only
+      // controls ambient INTENSITY each frame, not colour) so the cave's cool
+      // fill never leaks onto the overworld.
+      this.ambientLight.color.set(0x404080);
     }
     this._inCaveAtmosphere = inCave;
   }
