@@ -2,6 +2,47 @@
 
 All notable changes to VeilCraft.
 
+## [4.0] — Walkable underground systems & live-build fixes
+
+This release rebuilds the cave entrance into a genuinely **walkable underground system** and
+fixes the issues found while play-testing v3 live on GitHub Pages. The headline is the cave
+rework: the old entrance was effectively a vertical crater you couldn't move around in (you
+slid up the wall the moment you tried to walk), so it has been replaced with a real, sloped
+ramp you stroll down and back up.
+
+### Changed
+- **Caves are now walkable underground systems, not a crater.** The entrance is a sloped,
+  open-topped **ramp ("adit")** carved from a surface mouth down into the main chamber. Because
+  the ramp is modelled as its own cave volume, a single consistent floor function carries you
+  smoothly **down into the cave and back up into daylight** — no more being lifted out and
+  locked above the ceiling. The main chamber connects to 4–6 branching satellite chambers via
+  tunnels, forming a real multi-room network.
+- **Cave horizontal containment is wall-aware.** Leaving the carved volume now only blocks you
+  when the ground outside is an actual wall (terrain well above your feet). Walking out onto
+  open ground — e.g. up the ramp mouth — is always allowed, so you can never get trapped
+  underground.
+
+### Fixed
+- **Caves were unwalkable "cylinder holes."** Climbing the side wall on entry / being unable to
+  move around is gone; the ramp + union-based environment sampling keep you on a sensible floor
+  throughout the whole system.
+- **All enemies flickered when one took damage.** Damage flashes mutated a *shared* material;
+  every enemy now owns a cloned material, so only the struck enemy flashes.
+- **Day/night cycle ran far too fast.** Day length is now 300s (night 110s) for a calm,
+  readable cycle.
+- **You couldn't see the item in your hand.** The first-person camera is now part of the scene
+  graph, so the held-item view model (and swing animations) actually render on screen.
+- **`computeBoundingSphere(): radius is NaN` console spam.** Tunnel geometry treated chamber
+  *indices* as objects, producing a `NaN` cylinder height. Tunnels now resolve
+  `sys.chambers[t.a/t.b]` with a finite-length guard, eliminating the malformed geometry.
+
+### Tests & docs
+- The headless suite grew to **893 assertions** (entrance ramp geometry, open-topped ceiling,
+  ramp-floor descent mouth→chamber, NaN-geometry regression, graph connectivity).
+- A dedicated headless **player-physics simulation** (`tools/sim_cave.mjs`) walks the real
+  generated systems with gravity and asserts ramp **ingress**, **egress**, deep-chamber
+  **traversal**, and **zero surface leaks**.
+
 ## [3.0] — Real caves, first-person hands & combat feedback
 
 This release delivers the headline roadmap items that were still missing: genuine enclosed

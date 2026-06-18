@@ -26,7 +26,7 @@ from `icons.js`, so `icons.js` loads first).
 
 | File | Responsibility |
 |------|----------------|
-| `js/caves.js` | `VCCaves` — THREE-free, deterministic generation of enclosed **cave systems** (entrance crater, chambers, tunnels, ore deposits, crystals) and the sampling helpers (`sampleCaves`, `inEntrance`, `entranceCarve`) used by `world.js` and `main.js`. Loads before `world.js`. |
+| `js/caves.js` | `VCCaves` — THREE-free, deterministic generation of enclosed **cave systems** (a walkable sloped **entrance ramp**, branching chambers, tunnels, ore deposits, crystals) and the sampling helpers (`sampleCaves`, `inEntrance`, `entranceCarve`, `isInside`, `distToSegment`) used by `world.js` and `main.js`. Loads before `world.js`. |
 | `js/world.js` | Seeded procedural generation (Mulberry32 + value noise). Island heightfield, resource scatter, **cave/grotto carving**, **cave-system integration + deposits** (via `VCCaves`), resource damage/drops, serialize/deserialize. |
 | `js/entities.js` | Legacy entity manager + `Enemy`, `WaveManager`, `Pig`. (Live resource meshes are built in `main.js`.) |
 | `js/player.js` | Player movement, stamina/hunger, inventory class, input. |
@@ -70,13 +70,35 @@ node tools/gen-icons.mjs
 identical island. Terrain comes from `getHeightAt(x, z)` — a radial island mask combined with
 two octaves of value noise, a central dome and ridged mountains.
 
-**Caves/grottos:** a pure heightfield cannot represent true overhang tunnels, so VeilCraft
-carves **sunken rocky grottos** instead. `caveField(x, z)` is a low-frequency noise field;
-where it crosses a threshold, `caveDepth(x, z)` returns a 0..1 strength that `getHeightAt`
-uses to sink the terrain into an explorable basin (floor clamped above sea level). The richest
-ores — **coal, gold and extra iron** — are spawned only inside these grotto zones during a
-second, fixed-order generation pass, so descending underground pays off. This pass is
-deterministic and covered by the test suite.
+**Real cave systems (`js/caves.js`).** Each seed deterministically builds 5 enclosed
+**cave systems**. A system is a graph of **chambers** (each with `floorY`, `ceilY`, radius)
+linked by **tunnels** that store the *integer indices* of the chambers they connect (resolving
+those indices to objects — `sys.chambers[t.a]` — is mandatory; treating the index as an object
+is what once produced `NaN` cylinder geometry, now guarded and regression-tested).
+
+**The entrance is a walkable ramp ("adit"), not a crater.** Earlier versions sank a radial
+bowl and special-cased an "open zone" for it; because a bowl rises from its centre to its rim,
+walking horizontally lifted the player's feet *above* the chamber ceiling, which permanently
+locked them out of the cave (feet `>` ceiling) and dumped them back on the surface. The
+entrance is now a sloped, open-topped **ramp**: a segment from a surface `mouth` down to an
+`inner` point inside the main chamber, with `surfaceY`/`floorY` endpoints and half-width `r`.
+It is sampled as its *own* cave volume (`sampleCaves` interpolates the ramp floor along the
+segment and reports an open "ceiling"), so one consistent floor function handles **both**
+descent and exit. `entranceCarve` digs the matching trench into the terrain heightfield
+(blending to 0 at the mouth so it meets the surface seamlessly).
+
+`sampleCaves(systems, x, z)` returns the **union extent** (lowest floor, highest ceiling) of
+every chamber/tunnel/ramp volume containing the point — critical where a shallow tunnel
+overlaps a deep chamber, so the player is never pinned to the shallower ceiling. `isInside`
+is simply `sampleCaves(...) != null`.
+
+In `main.js` `_move`, horizontal containment is **wall-aware**: a step leaving the carved
+volume is reverted only when the terrain outside sits well above the player's feet (a wall);
+stepping onto open ground at/below the feet — walking up the ramp mouth into daylight — is
+allowed, so the player can never be trapped underground.
+
+The richest ores — **coal, gold and extra iron** — spawn only inside chambers during a fixed-order
+pass, so descending pays off. All of this is deterministic and covered by the test suite.
 
 ## Networking model
 
@@ -101,6 +123,20 @@ stubs (the game never touches WebGL at load time) and asserts on real data and l
 5. **Crafting system** — craft consumes ingredients & yields the result, stacking merges, consumables clamp.
 6. **World determinism** — same seed → identical world; different seed → different world.
 7. **Caves & terrain** — heights/cave depths are finite & in range, grottos exist, and all coal/gold ore spawns inside grotto zones with valid drops.
+8. **Real cave systems (`VCCaves`)** — structure & branching (≥5 chambers, integer tunnel indices, graph connectivity), union-extent sampling, walkable tunnel midpoints, wall containment, and the **entrance ramp** (mouth/inner geometry, open-topped ceiling, ramp-floor descent mouth→chamber, NaN-geometry regression). **893 assertions** total.
+
+### Headless player-physics simulation
+
+```bash
+node tools/sim_cave.mjs
+```
+
+The unit suite proves the cave *data* is sound; `tools/sim_cave.mjs` proves the *movement* is.
+It faithfully reproduces the `main.js` `_move` cave block **with gravity** and runs it against
+real generated systems, asserting: no interior point settles to the surface (no wall-climb),
+ramp **ingress** (walk from the mouth down into the chamber), ramp **egress** (walk back up
+into daylight — the anti-trap guarantee), and **traversal** of the tunnel graph to the deepest
+chamber without surfacing. Run it after any change to cave generation, sampling, or `_move`.
 
 > **What the tests cannot cover:** anything that needs a real WebGL context — actual rendering,
 > lighting, model loading, animation, pointer-lock input and frame timing. Those must be

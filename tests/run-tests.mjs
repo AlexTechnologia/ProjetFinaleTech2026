@@ -298,6 +298,8 @@ if (VCCaves && WORLD) {
   ok(typeof VCCaves.sampleCaves === 'function', 'VCCaves.sampleCaves exists');
   ok(typeof VCCaves.inEntrance === 'function', 'VCCaves.inEntrance exists');
   ok(typeof VCCaves.entranceCarve === 'function', 'VCCaves.entranceCarve exists');
+  ok(typeof VCCaves.isInside === 'function', 'VCCaves.isInside exists');
+  ok(typeof VCCaves.distToSegment === 'function', 'VCCaves.distToSegment exists');
 
   const mk = (seed) => {
     const rng = mulberry32(seed);
@@ -324,6 +326,42 @@ if (VCCaves && WORLD) {
   ok(floorBelowCeil, 'every chamber has floorY below ceilY (real headroom)');
   ok(depositsOk, 'cave deposits are coal / iron_ore / gold_ore only');
 
+  // ── Branching networks: multi-room systems with INDEXED tunnels. ──
+  let multiRoom = true, tunnelIdxOk = true, connectedOk = true, formationsOk = true;
+  let tunnelGeomFinite = true, tunnelGeomPositive = true;
+  for (const sys of a) {
+    if (sys.chambers.length < 5) multiRoom = false; // entrance + >=4 branches
+    // Every tunnel endpoint must be a valid INTEGER index into chambers — the
+    // exact contract main.js relies on (treating them as objects gave NaN).
+    for (const t of sys.tunnels) {
+      if (!Number.isInteger(t.a) || !Number.isInteger(t.b)) tunnelIdxOk = false;
+      const A = sys.chambers[t.a], B = sys.chambers[t.b];
+      if (!A || !B) { tunnelIdxOk = false; continue; }
+      // Reproduce main.js's tunnel geometry maths and assert it never NaNs.
+      const ay = A.floorY + t.r, by = B.floorY + t.r;
+      const len = Math.hypot(B.x - A.x, by - ay, B.z - A.z);
+      if (!Number.isFinite(len)) tunnelGeomFinite = false;
+      if (!(len > 0)) tunnelGeomPositive = false;
+    }
+    // Graph connectivity: every chamber reachable from the entrance (idx 0).
+    const adj = sys.chambers.map(() => []);
+    for (const t of sys.tunnels) { adj[t.a].push(t.b); adj[t.b].push(t.a); }
+    const seen = new Set([0]); const stack = [0];
+    while (stack.length) { const n = stack.pop(); for (const m of adj[n]) if (!seen.has(m)) { seen.add(m); stack.push(m); } }
+    if (seen.size !== sys.chambers.length) connectedOk = false;
+    // Formations (stalagmites / stalactites) reference valid chambers.
+    if (!Array.isArray(sys.formations)) formationsOk = false;
+    for (const f of sys.formations || []) {
+      if (!sys.chambers[f.chamber] || !(f.h > 0) || !(f.r > 0)) formationsOk = false;
+    }
+  }
+  ok(multiRoom, 'every system is a multi-room network (>= 5 chambers)');
+  ok(tunnelIdxOk, 'tunnels store valid INTEGER chamber indices (a, b)');
+  ok(tunnelGeomFinite, 'tunnel geometry length is always finite (no NaN CylinderGeometry)');
+  ok(tunnelGeomPositive, 'tunnel geometry length is always positive');
+  ok(connectedOk, 'every chamber is reachable from the entrance via tunnels');
+  ok(formationsOk, 'formations reference valid chambers with positive size');
+
   // sampleCaves resolves to a chamber at a chamber centre.
   const ch0 = a[0].chambers[0];
   const env = VCCaves.sampleCaves(a, ch0.x, ch0.z);
@@ -331,11 +369,44 @@ if (VCCaves && WORLD) {
   const farEnv = VCCaves.sampleCaves(a, 99999, 99999);
   ok(farEnv === null, 'sampleCaves returns null far from any cave');
 
-  // Entrance detection + carve.
-  ok(VCCaves.inEntrance(a, a[0].entrance.x, a[0].entrance.z) === true, 'inEntrance true at an entrance');
+  // A tunnel midpoint is walkable (sampleCaves resolves it via segment dist).
+  let tunnelWalkable = false;
+  for (const sys of a) {
+    if (!sys.tunnels.length) continue;
+    const t = sys.tunnels[0];
+    const A = sys.chambers[t.a], B = sys.chambers[t.b];
+    const mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
+    const env = VCCaves.sampleCaves(sys === a[0] ? a : [sys], mx, mz);
+    if (env && env.floor < env.ceil) { tunnelWalkable = true; break; }
+  }
+  ok(tunnelWalkable, 'sampleCaves resolves a walkable env at a tunnel midpoint');
+
+  // Horizontal containment contract: inside a chamber resolves, just past the
+  // wall does not (this is what stops the player climbing cave walls).
+  const cc = a[0].chambers[0];
+  ok(VCCaves.isInside(a, cc.x, cc.z) === true, 'isInside true at a chamber centre');
+  ok(VCCaves.isInside(a, cc.x + cc.r + 3, cc.z) === false, 'isInside false just outside the chamber wall');
+
+  // Entrance is now a walkable sloped RAMP (mouth on the surface → inner end in
+  // the chamber), not a vertical crater you fall down.
+  const e0 = a[0].entrance;
+  ok(e0 && e0.mouth && e0.inner && typeof e0.floorY === 'number', 'entrance exposes mouth/inner/floorY ramp geometry');
+  const rampMidX = (e0.mouth.x + e0.inner.x) / 2, rampMidZ = (e0.mouth.z + e0.inner.z) / 2;
+  ok(VCCaves.inEntrance(a, e0.mouth.x, e0.mouth.z) === true, 'inEntrance true at the ramp mouth');
+  ok(VCCaves.inEntrance(a, rampMidX, rampMidZ) === true, 'inEntrance true along the ramp');
   ok(VCCaves.inEntrance(a, 99999, 99999) === false, 'inEntrance false far away');
-  ok(VCCaves.entranceCarve(a, a[0].entrance.x, a[0].entrance.z) > 0, 'entranceCarve digs a crater at the entrance');
+  // The mouth meets the surface (no carve); the ramp digs DOWN toward the chamber.
+  ok(VCCaves.entranceCarve(a, rampMidX, rampMidZ) > 0, 'entranceCarve digs the ramp trench below the surface');
   eq(VCCaves.entranceCarve(a, 99999, 99999), 0, 'entranceCarve is 0 far from any entrance');
+  // The ramp is itself a walkable cave volume, and it is OPEN-topped (tall
+  // ceiling) so the player can always walk up it into daylight (no trap).
+  const rampEnv = VCCaves.sampleCaves(a, rampMidX, rampMidZ);
+  ok(rampEnv && rampEnv.floor < rampEnv.ceil, 'sampleCaves resolves a walkable env on the ramp');
+  ok(rampEnv && (rampEnv.ceil - rampEnv.floor) >= 12, 'the ramp is open-topped (tall ceiling) so you can walk out into daylight');
+  // Ramp floor descends from the surface (mouth) toward the chamber floor (inner).
+  const fMouth = VCCaves.sampleCaves(a, e0.mouth.x, e0.mouth.z);
+  const fInner = VCCaves.sampleCaves(a, e0.inner.x, e0.inner.z);
+  ok(fMouth && fInner && fInner.floor < fMouth.floor, 'ramp floor descends from the mouth down to the chamber');
 
   // World integration: generate() populates caveSystems and cave ores.
   const w = new World();
@@ -343,7 +414,7 @@ if (VCCaves && WORLD) {
   ok(Array.isArray(w.caveSystems) && w.caveSystems.length === 5, `world.generate populates caveSystems (${w.caveSystems.length})`);
   const wch = w.caveSystems[0].chambers[0];
   ok(w.getCaveEnv(wch.x, wch.z) != null, 'world.getCaveEnv returns an env inside a chamber');
-  ok(w.inCaveEntrance(w.caveSystems[0].entrance.x, w.caveSystems[0].entrance.z) === true, 'world.inCaveEntrance true at entrance');
+  ok(w.inCaveEntrance(w.caveSystems[0].entrance.mouth.x, w.caveSystems[0].entrance.mouth.z) === true, 'world.inCaveEntrance true at the ramp mouth');
   let caveResources = 0;
   for (const r of w.resources.values()) if (r.inCave) caveResources++;
   ok(caveResources > 0, `cave deposits registered as resources (${caveResources})`);

@@ -266,8 +266,16 @@ class Enemy {
     // health-bar / glowing-eye materials, which have no emissive channel).
     this._flashMats = [];
     g.traverse((o) => {
-      if (o.isMesh && o !== hpBar && o.material && o.material.emissive) {
-        this._flashMats.push({ m: o.material, e: o.material.emissive.getHex(), i: o.material.emissiveIntensity || 0 });
+      if (o.isMesh && o !== hpBar && o.material) {
+        // SkeletonUtils.clone() SHARES materials across every cloned enemy, so
+        // tinting one would make ALL enemies flash. Give this enemy its OWN
+        // material instances before collecting the flashable (emissive) ones.
+        if (Array.isArray(o.material)) o.material = o.material.map(m => (m && m.clone ? m.clone() : m));
+        else if (o.material.clone) o.material = o.material.clone();
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          if (m && m.emissive) this._flashMats.push({ m, e: m.emissive.getHex(), i: m.emissiveIntensity || 0 });
+        }
       }
     });
 
@@ -637,6 +645,10 @@ class PlayerAdapter {
     this._vmBaseRot = new THREE.Euler(0, 0, 0);
     this.heldItemContainer.position.copy(this._vmBasePos);
     this.camera.add(this.heldItemContainer);
+    // Objects parented to the camera (the first-person hand + held-item
+    // view-model) only render when the camera is itself part of the scene
+    // graph, so make sure it is added exactly once.
+    if (this.scene && !this.camera.parent) this.scene.add(this.camera);
     this.handGroup = this._buildHand();
     this.itemGroup = new THREE.Group();
     this.heldItemContainer.add(this.handGroup);
@@ -896,6 +908,7 @@ class PlayerAdapter {
     if (!this.onGround) this.velocity.y -= 25 * dt;
 
     const safeDt = Math.min(dt, 0.05);
+    const prevX = this.position.x, prevZ = this.position.z;
     this.position.x += this.velocity.x * safeDt;
     this.position.y += this.velocity.y * safeDt;
     this.position.z += this.velocity.z * safeDt;
@@ -907,19 +920,35 @@ class PlayerAdapter {
       let ceilCap = Infinity;
       this._inCave = false;
 
-      // Real caves: when our feet drop below a chamber ceiling we stand on the
-      // cave floor instead of the terrain above, and a ceiling clamp stops us
-      // popping up through solid rock. The open entrance crater uses the carved
-      // terrain so we can walk back out into daylight.
+      // Real caves: when our feet drop below a cave ceiling we stand on the
+      // cave floor instead of the terrain above. The entrance is a sloped,
+      // open-topped ramp that is itself part of the carved volume, so the SAME
+      // floor function carries us smoothly down into the cave and back up into
+      // daylight — no special-cased "crater" that fights the tunnels.
       const w = window.gameInstance?.world;
       const cave = w && w.getCaveEnv ? w.getCaveEnv(this.position.x, this.position.z) : null;
       if (cave) {
-        const open = w.inCaveEntrance(this.position.x, this.position.z);
         const feet = this.position.y - EYE;
-        if (!open && feet < cave.ceil + 0.3) {
+        if (feet < cave.ceil + 0.4) {
           groundY = cave.floor + EYE;
-          ceilCap = cave.ceil - 0.1;
-          this._inCave = this.position.y < (surf - 1.0);
+          this._inCave = true;
+
+          // Only clamp a real rock ceiling (an enclosed room/tunnel). The open
+          // entrance ramp has a very tall "ceiling" (open sky) so we never bonk
+          // our head while walking up it.
+          if (cave.ceil - cave.floor < 12) ceilCap = cave.ceil - 0.2;
+
+          // Axis-separated HORIZONTAL containment: revert a step that leaves
+          // the carved volume ONLY when the ground outside would be a wall we'd
+          // have to climb (its terrain sits well above our feet). Stepping out
+          // onto open ground at/below our feet — e.g. walking up the ramp into
+          // daylight — is allowed, so we never get trapped underground.
+          const blocked = (x, z) => {
+            if (w.getCaveEnv(x, z)) return false;       // still inside the cave
+            return getHeight(x, z) > feet + 1.0;        // a wall, not walkable ground
+          };
+          if (blocked(this.position.x, prevZ)) { this.position.x = prevX; this.velocity.x = 0; }
+          if (blocked(this.position.x, this.position.z)) { this.position.z = prevZ; this.velocity.z = 0; }
         }
       }
 
@@ -983,7 +1012,7 @@ class VeilCraftGame {
     this.saveSystem = null;
 
     // Day/night
-    this.DAY_DURATION  = 120; this.NIGHT_DURATION = 60;
+    this.DAY_DURATION  = 300; this.NIGHT_DURATION = 110;
     this.dayTime       = 0;  this.isNight = false; this.dayNumber = 1;
 
     // Scene objects
@@ -1796,7 +1825,7 @@ class VeilCraftGame {
   // Build the visible geometry for the real cave systems generated in world.js:
   // enclosed chambers (floor disc + wall cylinder + dome ceiling), connecting
   // tunnels, and glowing crystals. The entrance chamber keeps an open ceiling so
-  // daylight pours into the crater you climb down through.
+  // daylight pours down through the sloped ramp trench you walk in/out through.
   _buildCaves() {
     if (this._caveGroup) { this.scene.remove(this._caveGroup); this._disposeGroup(this._caveGroup); }
     this._caveGroup = new THREE.Group();
@@ -1809,6 +1838,25 @@ class VeilCraftGame {
 
     let crystalLightBudget = 6; // cap dynamic lights for performance
 
+    // Roughen a radial mesh (cylinder/dome/ring) so caves read as natural rock
+    // rather than perfect geometric primitives. Purely visual — collision uses
+    // the clean chamber/tunnel radii from caves.js.
+    const roughen = (geo, amt) => {
+      const p = geo.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        const r = Math.hypot(v.x, v.z);
+        if (r < 1e-3) continue;
+        const n = Math.sin(v.x * 1.7 + v.y * 2.3) + Math.cos(v.z * 1.9 - v.y * 1.1);
+        const s = 1 + (n * 0.5 * amt) / r;
+        v.x *= s; v.z *= s;
+        p.setXYZ(i, v.x, v.y, v.z);
+      }
+      p.needsUpdate = true;
+      geo.computeVertexNormals();
+    };
+
     for (const sys of systems) {
       let placedSystemLight = false;
       sys.chambers.forEach((ch, ci) => {
@@ -1820,40 +1868,67 @@ class VeilCraftGame {
         floor.receiveShadow = true;
         this._caveGroup.add(floor);
 
-        // Wall cylinder (open-ended tube around the chamber).
+        // Wall: open tube around the chamber, vertices jittered so it reads as
+        // rough rock rather than a perfect cylinder.
         const wallH = Math.max(2.5, ch.ceilY - ch.floorY);
-        const wall = new THREE.Mesh(new THREE.CylinderGeometry(ch.r, ch.r * 1.04, wallH, 20, 1, true), rockMat);
+        const wallGeo = new THREE.CylinderGeometry(ch.r, ch.r * 1.08, wallH, 28, 4, true);
+        roughen(wallGeo, 0.9);
+        const wall = new THREE.Mesh(wallGeo, rockMat);
         wall.position.set(ch.x, ch.floorY + wallH / 2, ch.z);
         this._caveGroup.add(wall);
 
         if (isEntrance) {
-          // Partial ring ceiling: leaves the centre open under the surface crater.
-          const ring = new THREE.Mesh(new THREE.RingGeometry(ch.r * 0.45, ch.r, 20), rockMat);
+          // Partial ring ceiling: leaves the centre open so daylight from the
+          // surface ramp trench reaches the chamber floor (the carved terrain
+          // renders the sloped ramp itself).
+          const ringGeo = new THREE.RingGeometry(ch.r * 0.42, ch.r, 24);
+          const ring = new THREE.Mesh(ringGeo, rockMat);
           ring.rotation.x = Math.PI / 2;
           ring.position.set(ch.x, ch.ceilY, ch.z);
           this._caveGroup.add(ring);
         } else {
-          // Full dome ceiling for satellite chambers (sealed underground).
-          const dome = new THREE.Mesh(new THREE.SphereGeometry(ch.r, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), rockMat);
+          // Full domed ceiling for satellite chambers (sealed underground).
+          const domeGeo = new THREE.SphereGeometry(ch.r, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+          roughen(domeGeo, 0.7);
+          const dome = new THREE.Mesh(domeGeo, rockMat);
           dome.position.set(ch.x, ch.ceilY, ch.z);
           this._caveGroup.add(dome);
         }
       });
 
-      // Tunnels: open horizontal cylinders linking chamber centres.
+      // Tunnels: open bored cylinders linking chamber centres.
+      // t.a / t.b are INTEGER INDICES into sys.chambers, NOT chamber objects —
+      // resolving them is what previously produced NaN geometry.
       (sys.tunnels || []).forEach(t => {
-        const a = t.a, b = t.b;
-        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const a = sys.chambers[t.a], b = sys.chambers[t.b];
+        if (!a || !b) return;
+        // Run the bore at head height between the two chamber floors.
+        const ay = a.floorY + t.r, by = b.floorY + t.r;
+        const dx = b.x - a.x, dy = by - ay, dz = b.z - a.z;
         const len = Math.hypot(dx, dy, dz);
-        if (len < 0.1) return;
-        const tube = new THREE.Mesh(new THREE.CylinderGeometry(t.r, t.r, len, 12, 1, true), rockMat);
+        if (!isFinite(len) || len < 0.1) return;
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(t.r, t.r, len, 14, 1, true), rockMat);
         // Orient the cylinder (default +Y) along the segment direction.
-        const mid = new THREE.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+        const mid = new THREE.Vector3((a.x + b.x) / 2, (ay + by) / 2, (a.z + b.z) / 2);
         tube.position.copy(mid);
         const dirv = new THREE.Vector3(dx, dy, dz).normalize();
         const up = new THREE.Vector3(0, 1, 0);
         tube.quaternion.setFromUnitVectors(up, dirv);
         this._caveGroup.add(tube);
+      });
+
+      // Stalagmites (floor) & stalactites (ceiling) for cave detail.
+      (sys.formations || []).forEach(f => {
+        const ch = sys.chambers[f.chamber];
+        if (!ch) return;
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(f.r, f.h, 7), rockMat);
+        if (f.ceiling) {
+          cone.position.set(f.x, ch.ceilY - f.h / 2, f.z);
+          cone.rotation.x = Math.PI; // hang point-down from the ceiling
+        } else {
+          cone.position.set(f.x, ch.floorY + f.h / 2, f.z);
+        }
+        this._caveGroup.add(cone);
       });
 
       // Glowing crystals (emissive) — light a few of them for atmosphere.
