@@ -434,6 +434,34 @@ html, body {
 
 #inv-section { flex: none; }
 
+/* Equipment slots (armor + off-hand) above the inventory grid */
+#equip-section {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 0.9rem;
+}
+.equip-slot {
+  flex: 1;
+  min-height: 60px;
+  border: 1.5px dashed rgba(167,139,250,0.45);
+  border-radius: 10px;
+  background: rgba(124,58,237,0.06);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.equip-slot:hover { border-color: rgba(167,139,250,0.9); background: rgba(124,58,237,0.16); }
+.equip-slot.equipped { border-style: solid; border-color: #a78bfa; background: rgba(124,58,237,0.18); box-shadow: inset 0 0 10px rgba(139,92,246,0.25); }
+.equip-slot .equip-placeholder { font-size: 1.4rem; opacity: 0.55; line-height: 1; }
+.equip-slot .equip-icon { font-size: 1.5rem; line-height: 1; }
+.equip-slot .equip-icon .vc-icon, .equip-slot .equip-icon img { width: 30px; height: 30px; object-fit: contain; }
+.equip-slot .equip-label { font-size: 0.6rem; letter-spacing: 0.5px; text-transform: uppercase; color: var(--accent-light); opacity: 0.85; }
+.equip-slot[data-rarity="uncommon"] { border-color: #5fd35f; }
+.equip-slot[data-rarity="rare"] { border-color: #5aa9ff; }
+.equip-slot[data-rarity="epic"] { border-color: #c264ff; }
+
 #inventory-grid {
   display: grid;
   grid-template-columns: repeat(6, 52px);

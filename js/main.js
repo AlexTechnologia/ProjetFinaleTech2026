@@ -653,8 +653,15 @@ class PlayerAdapter {
     this.itemGroup = new THREE.Group();
     this.heldItemContainer.add(this.handGroup);
     this.heldItemContainer.add(this.itemGroup);
+    // Off-hand view-model (equipped shield / torch / food) shown on the LEFT.
+    this.offhandContainer = new THREE.Group();
+    this.offhandContainer.position.set(-0.55, -0.42, -0.8);
+    this.camera.add(this.offhandContainer);
+    this.offhandGroup = new THREE.Group();
+    this.offhandContainer.add(this.offhandGroup);
     this._swingT = 1; // 1 = idle, set to 0 to start a swing
     this.updateHeldItem();
+    this.recomputeArmor();
 
     this._setupInput(domElement);
   }
@@ -700,42 +707,74 @@ class PlayerAdapter {
     }
   }
 
-  updateHeldItem() {
-    if (!this.itemGroup) return;
-    while (this.itemGroup.children.length) this.itemGroup.remove(this.itemGroup.children[0]);
-    const item = this.inventory.getSelectedItem();
-    if (!item) return;
-    const db = window.ITEM_DB?.[item.type];
-    const color = ITEM_COLORS_MAP[item.type] || 0xAAAAAA;
-    
-    let mesh = null;
+  // Build a small view-model mesh for an item type (shared by both hands).
+  _buildItemMesh(type) {
+    const db = window.ITEM_DB?.[type];
+    const color = ITEM_COLORS_MAP[type] || 0xAAAAAA;
+    // Stone / bricks previously used a brown-tinted model that read as a "log".
+    // Render them as an explicit grey low-poly rock so stone always looks like
+    // stone.
+    const STONE_GREY = { rock: 0x8d909c, stone_brick: 0x9aa0ad };
+    if (STONE_GREY[type] != null) {
+      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 0),
+        new THREE.MeshStandardMaterial({ color: STONE_GREY[type], roughness: 0.95, flatShading: true }));
+      m.scale.set(1, 0.8, 1.15);
+      return m;
+    }
     // Prefer a real low-poly model in the hand when one is available.
     const HELD_MODELS = {
       wooden_axe: 'tool-axe', stone_axe: 'tool-axe', iron_axe: 'tool-axe',
       wooden_pickaxe: 'tool-pickaxe', stone_pickaxe: 'tool-pickaxe', iron_pickaxe: 'tool-pickaxe',
       wood: 'resource-wood', birch_wood: 'resource-wood', bark: 'resource-wood',
-      rock: 'resource-stone', stone_brick: 'resource-stone',
       flint: 'rock-flat', iron_ore: 'rock-a', gold_ore: 'rock-a', coal: 'rock-b',
     };
-    const modelKey = HELD_MODELS[item.type];
+    const modelKey = HELD_MODELS[type];
     if (modelKey && window.VCAssets && window.VCAssets.has(modelKey)) {
       const built = window.VCAssets.buildModel(modelKey, 0.45);
       if (built && built.object) {
-        built.object.position.set(0, 0, 0);
-        built.object.rotation.set(0.2, Math.PI * 0.15, 0.1);
-        mesh = built.object;
+        let hasMesh = false; built.object.traverse(o => { if (o.isMesh) hasMesh = true; });
+        if (hasMesh) {
+          built.object.position.set(0, 0, 0);
+          built.object.rotation.set(0.2, Math.PI * 0.15, 0.1);
+          return built.object;
+        }
       }
     }
-    if (!mesh) {
-      if (db?.type === 'tool' || db?.type === 'armor') {
-        mesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), new THREE.MeshLambertMaterial({ color }));
-        mesh.position.set(0, 0.4, 0);
-        mesh.rotation.x = Math.PI / 6;
-      } else {
-        mesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshLambertMaterial({ color }));
-      }
+    if (db?.type === 'tool' || db?.type === 'armor') {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), new THREE.MeshLambertMaterial({ color }));
+      m.position.set(0, 0.4, 0); m.rotation.x = Math.PI / 6; return m;
     }
-    this.itemGroup.add(mesh);
+    return new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshLambertMaterial({ color }));
+  }
+
+  updateHeldItem() {
+    if (!this.itemGroup) return;
+    while (this.itemGroup.children.length) this.itemGroup.remove(this.itemGroup.children[0]);
+    const item = this.inventory.getSelectedItem();
+    if (item) this.itemGroup.add(this._buildItemMesh(item.type));
+    this.updateOffhandItem();
+  }
+
+  // Render the equipped off-hand item (shield / torch / food) on the left.
+  updateOffhandItem() {
+    if (!this.offhandGroup) return;
+    while (this.offhandGroup.children.length) this.offhandGroup.remove(this.offhandGroup.children[0]);
+    const eq = this.inventory.equipment && this.inventory.equipment.offhand;
+    if (!eq) return;
+    this.offhandGroup.add(this._buildItemMesh(eq.type));
+  }
+
+  // Sum armor from equipped armor + off-hand shield so equipping actually
+  // reduces incoming damage (takeDamage subtracts this.armor).
+  recomputeArmor() {
+    let a = 0;
+    const eq = (this.inventory && this.inventory.equipment) || {};
+    for (const k in eq) {
+      const it = eq[k]; if (!it) continue;
+      const def = window.ITEM_DB?.[it.type];
+      if (def && def.armor) a += def.armor;
+    }
+    this.armor = a;
   }
 
   _buildControls(camera, el) {
@@ -839,6 +878,7 @@ class PlayerAdapter {
       if (db.stamina) this.stamina = Math.min(this.maxStamina, this.stamina + db.stamina);
       item.count--;
       if (item.count <= 0) this.inventory.slots[this.inventory.selectedSlot] = null;
+      this.updateHeldItem();   // refresh the hand so an eaten item visibly leaves it
       if (window.audio) window.audio.playPickup();
       if (window.gameInstance) {
         window.gameInstance.ui.showPickup(`${db.icon} ${db.name || item.type} utilisé`);
@@ -1129,9 +1169,10 @@ class VeilCraftGame {
     this.scene.add(moonLight);
     this._moonLight = moonLight;
 
-    // Player head-torch: a warm point light that follows the camera and only
-    // lights up when the player is underground in a real cave.
-    this.torchLight = new THREE.PointLight(0xfff1e0, 0.0, 34, 1.2);
+    // Player head-torch: a near-white (very slightly warm) point light that
+    // follows the camera and only lights up underground. Near-white + a cool
+    // ambient fill is what keeps the rock reading as grey stone, not brown.
+    this.torchLight = new THREE.PointLight(0xfff1e0, 0.0, 32, 1.3);
     this.torchLight.position.set(0, 1.6, 0);
     this.scene.add(this.torchLight);
     this._inCaveAtmosphere = false;
@@ -1158,8 +1199,11 @@ class VeilCraftGame {
 
     // Water
     if (THREE.Water) {
+      // A RING of water (inner radius just outside the cave field) instead of a
+      // full plane: there is now NO water slab sitting under the island
+      // interior, so it can't show through the ground at a cave mouth.
       this._waterMesh = new THREE.Water(
-        new THREE.PlaneGeometry(2000, 2000),
+        new THREE.RingGeometry(158, 1200, 96, 1),
         {
           textureWidth: 512,
           textureHeight: 512,
@@ -1179,7 +1223,7 @@ class VeilCraftGame {
       this.scene.add(this._waterMesh);
     } else {
       this._waterMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(2000, 2000).rotateX(-Math.PI/2),
+        new THREE.RingGeometry(158, 1200, 96, 1).rotateX(-Math.PI/2),
         new THREE.MeshLambertMaterial({ color: 0x1565c0, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
       );
       this._waterMesh.position.y = -0.3;
@@ -1577,7 +1621,13 @@ class VeilCraftGame {
       if (t === 'rock') key = ['rock_a', 'rock_b', 'rock_c'][Math.floor(Math.random() * 3)];
       if (key && window.VCAssets.has(key)) {
         const built = window.VCAssets.buildModel(key, _RES_MODEL[1] * s);
-        if (built) { built.object.rotation.y = Math.random() * Math.PI * 2; g.add(built.object); return g; }
+        // Only accept a model that actually contains a renderable mesh. If the
+        // GLB failed to load (e.g. a 404 on a host) `built` can be truthy yet
+        // empty, which would leave invisible trees/rocks. Falling through to the
+        // procedural shapes below guarantees something always renders.
+        let hasMesh = false;
+        if (built && built.object) built.object.traverse(o => { if (o.isMesh) hasMesh = true; });
+        if (hasMesh) { built.object.rotation.y = Math.random() * Math.PI * 2; g.add(built.object); return g; }
       }
     }
 
@@ -1833,16 +1883,15 @@ class VeilCraftGame {
     const systems = this.world && this.world.caveSystems ? this.world.caveSystems : [];
     if (!systems.length) { this.scene.add(this._caveGroup); return; }
 
-    // Cool blue-grey STONE. The per-chamber fill lights are a neutral cool tone
-    // and the head-torch is now near-white, so this grey reads as actual rock
-    // instead of the muddy brown produced when a strong orange torch was the
-    // only light source on near-black rock.
+    // Cool blue-grey STONE. The cave fill light is a neutral cool tone and the
+    // head-torch is now near-white, so this grey reads as actual rock instead
+    // of the muddy brown you get when a warm torch is the only light source.
     const rockMat  = new THREE.MeshStandardMaterial({ color: 0xb0b4c4, roughness: 0.95, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x8a8e9e, roughness: 1.0, metalness: 0.0, flatShading: true });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x868a9c, roughness: 1.0, metalness: 0.0, flatShading: true });
 
-    // Budget of dynamic lights (perf): a soft fill light per chamber plus a few
-    // coloured crystal glows, all drawn from this shared pool.
-    let lightBudget = 20;
+    // Budget of dynamic lights (perf): a soft fill light per chamber + a few
+    // coloured crystal glows, drawn from the same pool.
+    let lightBudget = 18;
 
     // Roughen a radial mesh (cylinder/dome/ring) so caves read as natural rock
     // rather than perfect geometric primitives. Purely visual — collision uses
@@ -1875,7 +1924,7 @@ class VeilCraftGame {
         this._caveGroup.add(floor);
 
         // Wall: open tube around the chamber, vertices GENTLY jittered so it
-        // reads as rough rock — not the spiky, disorienting walls that heavy
+        // reads as rough rock — not the spiky, disorienting mess that heavy
         // jitter produced (which made chambers hard to read and navigate).
         const wallH = Math.max(2.5, ch.ceilY - ch.floorY);
         const wallGeo = new THREE.CylinderGeometry(ch.r, ch.r * 1.06, wallH, 30, 4, true);
@@ -1884,10 +1933,10 @@ class VeilCraftGame {
         wall.position.set(ch.x, ch.floorY + wallH / 2, ch.z);
         this._caveGroup.add(wall);
 
-        // Soft neutral fill light per chamber so the WHOLE room is readable, not
-        // just the torch cone right in front of you — key to navigability.
+        // Soft neutral fill light per chamber so the whole room is readable,
+        // not just the torch cone right in front of you.
         if (lightBudget > 0) {
-          const fill = new THREE.PointLight(0x9fb0d8, 0.7, ch.r * 2.6, 1.5);
+          const fill = new THREE.PointLight(0x9fb0d8, 0.65, ch.r * 2.4, 1.5);
           fill.position.set(ch.x, ch.floorY + wallH * 0.6, ch.z);
           this._caveGroup.add(fill);
           lightBudget--;
@@ -1903,20 +1952,34 @@ class VeilCraftGame {
           ring.position.set(ch.x, ch.ceilY, ch.z);
           this._caveGroup.add(ring);
         } else {
-          // Full domed ceiling for satellite chambers (sealed underground).
-          const domeGeo = new THREE.SphereGeometry(ch.r, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2);
-          roughen(domeGeo, 0.38);
-          const dome = new THREE.Mesh(domeGeo, rockMat);
-          dome.position.set(ch.x, ch.ceilY, ch.z);
-          this._caveGroup.add(dome);
+          // Ceiling cap for satellite chambers. A FLAT roughened disc at the
+          // chamber ceiling — NOT a hemisphere. The old hemisphere rose a full
+          // chamber radius ABOVE ceilY, which is what poked through the grass as
+          // "floating clouds". A disc only ever sits at ceilY (now clamped below
+          // the surface in caves.js), so nothing shows above ground. A little
+          // per-vertex relief (bumps dip down into the room) keeps it from
+          // looking dead flat.
+          const capGeo = new THREE.CircleGeometry(ch.r, 26);
+          {
+            const p = capGeo.attributes.position;
+            for (let i = 0; i < p.count; i++) {
+              const x = p.getX(i), y = p.getY(i);
+              if (Math.hypot(x, y) > 0.5) p.setZ(i, (Math.sin(x * 1.9) + Math.cos(y * 1.7)) * 0.3);
+            }
+            p.needsUpdate = true; capGeo.computeVertexNormals();
+          }
+          const cap = new THREE.Mesh(capGeo, rockMat);
+          cap.rotation.x = Math.PI / 2;  // face downward into the room
+          cap.position.set(ch.x, ch.ceilY, ch.z);
+          this._caveGroup.add(cap);
         }
       });
 
       // Tunnels: open bored corridors linking chambers. t.a / t.b are INTEGER
       // INDICES into sys.chambers, NOT chamber objects — resolving them is what
       // previously produced NaN geometry. The rendered bore is TRIMMED to the
-      // chamber rims so it reads as a passage mouth in each wall instead of a
-      // lump poking into the room, and gets a flat floor strip so the corridor
+      // chamber rims (so it reads as a passage mouth in each wall instead of a
+      // lump poking into the room), and gets a flat floor strip so the corridor
       // looks like walkable ground.
       const UP = new THREE.Vector3(0, 1, 0);
       (sys.tunnels || []).forEach(t => {
@@ -1941,9 +2004,9 @@ class VeilCraftGame {
         this._caveGroup.add(tube);
         // Flat corridor floor strip (length along the bore, normal up).
         const right = new THREE.Vector3().crossVectors(UP, dirv).normalize();
-        const upv = new THREE.Vector3().crossVectors(dirv, right).normalize();
+        const up = new THREE.Vector3().crossVectors(dirv, right).normalize();
         const strip = new THREE.Mesh(new THREE.PlaneGeometry(t.r * 1.9, len), floorMat);
-        strip.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, dirv, upv));
+        strip.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, dirv, up));
         strip.position.set((sx + ex2) / 2, (sFloor + eFloor) / 2 + 0.03, (sz + ez2) / 2);
         this._caveGroup.add(strip);
       });
@@ -1962,19 +2025,21 @@ class VeilCraftGame {
         this._caveGroup.add(cone);
       });
 
-      // Glowing crystals (emissive) — light a few of them for atmosphere.
+      // Glowing crystals (emissive) — light a few of them for colour + atmosphere.
       (sys.crystals || []).forEach((cr, idx) => {
         const hue = (cr.hue != null ? cr.hue : 0.55);
         const col = new THREE.Color().setHSL(hue, 0.75, 0.58);
-        const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.2, roughness: 0.4, metalness: 0.1, flatShading: true });
+        const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.25, roughness: 0.4, metalness: 0.1, flatShading: true });
         const geo = (idx % 2 === 0)
           ? new THREE.ConeGeometry(0.18, cr.h || 0.8, 6)
           : new THREE.IcosahedronGeometry((cr.h || 0.8) * 0.4, 0);
         const m = new THREE.Mesh(geo, mat);
         m.position.set(cr.x, cr.y + (cr.h || 0.8) * 0.5, cr.z);
         this._caveGroup.add(m);
+        // One coloured glow per system for atmosphere (chamber fill lights above
+        // already handle readability), drawn from the shared budget.
         if (!placedSystemLight && lightBudget > 0) {
-          const pl = new THREE.PointLight(col.getHex(), 1.0, 12, 2);
+          const pl = new THREE.PointLight(col.getHex(), 1.1, 13, 2);
           pl.position.set(cr.x, cr.y + 0.8, cr.z);
           this._caveGroup.add(pl);
           placedSystemLight = true;
@@ -2006,29 +2071,25 @@ class VeilCraftGame {
     // Keep the torch on the player's head.
     this.torchLight.position.set(this.camera.position.x, this.camera.position.y, this.camera.position.z);
     const inCave = !!this.player._inCave;
+    // Hide the ocean ring while underground so its surface never shows through
+    // the rock or at a cave mouth ("water layer under the map").
+    if (this._waterMesh) this._waterMesh.visible = !inCave;
     // Smoothly ramp torch intensity so entering/leaving a cave isn't jarring.
-    const targetTorch = inCave ? 1.4 : 0.0;
+    const targetTorch = inCave ? 1.7 : 0.0;
     this.torchLight.intensity += (targetTorch - this.torchLight.intensity) * Math.min(1, dt * 6);
     if (inCave) {
-      this.sunLight.intensity   *= 0.12;
+      this.sunLight.intensity   *= 0.15;
       // Strong, steady, cool-neutral ambient FILL so the whole chamber stays
-      // readable (not just the torch cone) — this is what makes caves navigable.
-      // The cool fill balances the near-white torch so the grey rock reads as
-      // grey STONE rather than the muddy brown / near-black it was before.
-      this.ambientLight.intensity = 0.6;
+      // readable (not just the torch cone) — this makes caves navigable and
+      // never lets them go pitch black. The cool fill balances the near-white
+      // torch so the grey rock reads as stone, not muddy brown.
+      this.ambientLight.intensity = 0.72;
       this.ambientLight.color.set(0x6b76a0);
       if (this.scene.fog) {
-        // Lighter haze + a cooler (less pure-black) fog so you can see across a
-        // chamber and actually navigate.
-        this.scene.fog.density = 0.022;
+        this.scene.fog.density = 0.018;
         this.scene.fog.color.lerp(new THREE.Color(0x14161f), Math.min(1, dt * 4));
       }
       if (this.starField) this.starField.visible = false;
-    } else if (this._inCaveAtmosphere) {
-      // Just left a cave: restore the surface ambient tint (day/night only
-      // controls ambient INTENSITY each frame, not colour) so the cave's cool
-      // fill never leaks onto the overworld.
-      this.ambientLight.color.set(0x404080);
     }
     this._inCaveAtmosphere = inCave;
   }
@@ -2063,12 +2124,14 @@ class VeilCraftGame {
     if (!this.isNight) {
       const td = t / dayFrac;
       let s = 1.0;
-      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.8; ambInt = s * 0.4 + 0.1; }
-      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.8; ambInt = s * 0.3 + 0.1; }
-      else { sunInt = 0.8; ambInt = 0.4; }
+      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.85; ambInt = s * 0.35 + 0.30; }
+      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.85; ambInt = s * 0.3 + 0.30; }
+      else { sunInt = 0.85; ambInt = 0.5; }
       this.starField.visible = false;
     } else {
-      sunInt = 0; ambInt = 0.5; this.starField.visible = true;
+      // Night keeps a soft floor (ambient + moonlight) so it never goes pitch
+      // black — you can always see enough to fight off the wave.
+      sunInt = 0; ambInt = 0.6; this.starField.visible = true;
     }
 
     this.sunLight.intensity = sunInt;

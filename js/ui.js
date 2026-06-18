@@ -29,6 +29,7 @@ class UI {
       hotbarSlots:   [],
       inventoryPanel:document.getElementById('inventory-panel'),
       inventoryGrid: document.getElementById('inventory-grid'),
+      equipSlots:    Array.from(document.querySelectorAll('#equip-section .equip-slot')),
       recipeList:    document.getElementById('recipe-list'),
       craftTitle:    document.getElementById('craft-title'),
       craftWsLabel:  document.getElementById('craft-workstation-label'),
@@ -115,6 +116,42 @@ class UI {
 
       this.els.inventoryGrid.appendChild(slot);
     }
+
+    // Equipment slots (armor / off-hand): click while an inventory item is
+    // selected to equip it; click an occupied slot with nothing selected to
+    // take the equipped item back.
+    for (const el of (this.els.equipSlots || [])) {
+      el.addEventListener('click', () => this._onEquipSlotClick(el.dataset.equip));
+      el.addEventListener('mouseenter', (e) => this._showEquipTooltip(e, el.dataset.equip));
+      el.addEventListener('mouseleave', () => this._hideTooltip());
+    }
+  }
+
+  _onEquipSlotClick(slotName) {
+    if (!this.player || !slotName) return;
+    const inv = this.player.inventory;
+    let changed = false;
+    if (this._selectedInvSlot !== -1) {
+      // Try to equip the currently-selected inventory item.
+      changed = inv.equipTo(slotName, this._selectedInvSlot);
+      this._selectedInvSlot = -1;
+    } else if (inv.equipment[slotName]) {
+      // Nothing selected → unequip back into the bag.
+      changed = inv.unequip(slotName);
+    }
+    if (changed) {
+      this.player.recomputeArmor?.();
+      this.player.updateHeldItem?.();
+      this.updateHotbar();
+      this.updateHUD?.(this.player);
+    }
+    this.updateInventoryGrid();
+  }
+
+  _showEquipTooltip(e, slotName) {
+    if (!this.player) return;
+    const it = this.player.inventory.equipment?.[slotName];
+    if (it) this._showTooltip(e, null, it.type);
   }
 
   _onInvSlotClick(index) {

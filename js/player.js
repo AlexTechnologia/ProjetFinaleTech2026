@@ -144,6 +144,46 @@ class Inventory {
     this.slots = new Array(size).fill(null); // null or { type, count }
     this.hotbarSize = 10;
     this.selectedSlot = 0;
+    // Dedicated equipment slots, separate from the main grid.
+    //  - armor:   body armor (leather / iron / gold) → adds def.armor
+    //  - offhand: a shield or a quick-access consumable (torch / food)
+    this.equipment = { armor: null, offhand: null };
+  }
+
+  /** Which equipment slot (if any) an item type may go into. */
+  equipSlotFor(type) {
+    const def = (typeof window !== 'undefined' && window.ITEM_DB) ? window.ITEM_DB[type] : null;
+    if (!def) return null;
+    if (def.type === 'armor') return 'armor';
+    if (def.toolType === 'shield' || def.type === 'consumable') return 'offhand';
+    return null;
+  }
+
+  canEquipTo(slotName, type) { return this.equipSlotFor(type) === slotName; }
+
+  /**
+   * Move one of slots[index] into equipment[slotName]. Any previously equipped
+   * item is returned to the inventory. Returns true on success.
+   */
+  equipTo(slotName, index) {
+    const item = this.slots[index];
+    if (!item || !this.canEquipTo(slotName, item.type)) return false;
+    const prev = this.equipment[slotName];
+    this.equipment[slotName] = { type: item.type, count: 1 };
+    item.count--;
+    if (item.count <= 0) this.slots[index] = null;
+    if (prev) this.addItem(prev.type, prev.count);
+    return true;
+  }
+
+  /** Unequip a slot back into the inventory. Fails (keeps equipped) if full. */
+  unequip(slotName) {
+    const it = this.equipment[slotName];
+    if (!it) return false;
+    const leftover = this.addItem(it.type, it.count);
+    if (leftover > 0) return false; // no room — leave it equipped
+    this.equipment[slotName] = null;
+    return true;
   }
 
   getHotbar() { return this.slots.slice(0, this.hotbarSize); }
@@ -220,11 +260,12 @@ class Inventory {
     return dropped;
   }
 
-  serialize() { return { slots: this.slots, selectedSlot: this.selectedSlot }; }
+  serialize() { return { slots: this.slots, selectedSlot: this.selectedSlot, equipment: this.equipment }; }
   deserialize(data) {
     if (data) {
       this.slots = data.slots || new Array(this.size).fill(null);
       this.selectedSlot = data.selectedSlot || 0;
+      this.equipment = Object.assign({ armor: null, offhand: null }, data.equipment || {});
     }
   }
 }

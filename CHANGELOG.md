@@ -2,38 +2,47 @@
 
 All notable changes to VeilCraft.
 
-## [4.1] — Cave readability & navigation polish
+## [4.2] — Surface/cave polish, equipment & smarter mobs
 
-Follow-up to the 4.0 cave rework, addressing live play-test feedback that the caves looked
-**brown** and felt **weird and hard to navigate**. The geometry from 4.0 was sound; the
-problems were lighting and proportions. Caves now read as bright, open, grey-stone caverns
-you can comfortably move through.
+A broad play-test pass fixing visual glitches above and below ground, adding an equipment screen,
+and making combat feel fair.
+
+### Added
+- **Equipment slots in the inventory.** Opening the inventory now shows a dedicated **Armor** slot
+  and an **Off-hand** slot (for a shield, torch, or a quick-access food). Click an item then click a
+  slot to equip; click an equipped slot with nothing selected to take it back. Equipped armor feeds
+  straight into damage reduction, and the whole equipment state is saved/loaded with the game.
 
 ### Fixed
-- **Rock looked muddy brown.** The only meaningful light underground was a strongly orange
-  head-torch (`0xffb169`) shining on near-black rock (`0x4a4658`), and the cave ambient was
-  crushed to near-zero (0.06) under heavy near-black fog — so everything turned brown and
-  murky. The torch is now **near-white** (`0xfff1e0`, longer reach), the rock is a lighter
-  **cool blue-grey stone** (`0xb0b4c4`), and underground ambient is a steady **cool fill**
-  (`0x6b76a0` @ 0.6) with lighter, cooler fog. Grey stone now reads as grey stone.
-- **Caves were hard to navigate.** Three causes, all fixed:
-  - **Too cramped** — main hall and satellite chambers are taller (≈7–10 of headroom) and
-    wider, and tunnels are now proper **walkable-width corridors** (radius ≈3.4–4.8, up from
-    ≈2.2–3.2).
-  - **Too dark to see across a room** — every chamber now gets its own **soft cool fill light**
-    so the whole room is readable, not just the torch cone in front of you.
-  - **Disorienting shapes** — wall/dome jitter was dialed way back (rough rock, not spiky
-    chaos), and tunnels are **trimmed to the chamber rims** with a **flat floor strip** so a
-    passage reads as a mouth in the wall instead of a lump poking into the room.
-- **Cave tint could leak onto the surface.** The cave ambient now resets to the surface tone
-  the moment you leave, so the overworld is never left with a cool cast.
+- **No more “clouds” floating over the ground.** Cave chamber ceilings are now clamped to stay below
+  the surface, so cave domes can never poke up through the terrain. This is the same root cause as
+  the bug where you could **walk into a wall and pop out the top** of the world — both are gone.
+- **Trees spawn again.** When a model file is empty/unavailable, the world now falls back to the
+  built-in procedural tree instead of rendering nothing.
+- **Held rock looks like a rock, not a log.** Stone/rock in hand now uses a proper grey stone mesh.
+- **No water showing through cave entrances.** The ocean is now a ring around the island instead of a
+  full plane under the map, and it’s hidden entirely while you’re underground.
+- **Eating a mushroom now clears it from your hand** once the stack is used up.
+- **Mobs no longer aggro from across the map.** Detection ranges were tightened, enemies ignore
+  targets far above/below them, and a leash keeps them from chasing endlessly.
+- **Lighting never gets too dark.** Day/night ambient light floors were raised and cave lighting
+  brightened so you can always see, while keeping a nighttime mood.
 
-### Tests & docs
-- The headless suite grew to **896 assertions** — added **navigability invariants**: every
-  chamber has comfortable standing headroom (≥ 6) yet stays an enclosed room (< 12, so the
-  head-clamp still engages), and every tunnel is a walkable-width corridor (radius ≥ 3.0).
-- `tools/sim_cave.mjs` re-run against the roomier layout: 0 surface leaks, ingress/egress and
-  deepest-chamber traversal all pass.
+## [4.1] — Cave readability & navigation pass
+
+Follow-up to v4 after play-testing: the caves were navigable but **too dark and muddy** — the
+warm head-torch was almost the only light, which tinted the grey rock brown and left everything
+outside the torch cone in shadow, making it hard to read the layout.
+
+### Changed
+- **Rock now looks like grey stone, not brown.** Cave rock/floor materials were re-coloured to a
+  neutral light grey, and the head-torch was softened (warmer-but-paler, wider reach) so it lights
+  the stone instead of staining it.
+- **Caves are much easier to navigate.** A steady, cool **ambient fill** now lights the whole
+  chamber (not just the torch cone), the fog was pulled back so you can see across a room, and the
+  glowing crystals shine brighter and reach further.
+- **Roomier underground.** Chambers (~30% larger), tunnels and the entrance ramp were widened and
+  given more headroom, so moving through the system feels open rather than cramped.
 
 ## [4.0] — Walkable underground systems & live-build fixes
 

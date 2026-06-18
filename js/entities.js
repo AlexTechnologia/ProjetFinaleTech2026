@@ -571,19 +571,19 @@ const ENEMY_TYPES = {
     label: 'Gobelin',
     hp: 30, damage: 5, speed: 4.5, attackRate: 1.0, attackRange: 1.5,
     color: 0x4ade80, size: [0.35, 1.0, 0.35], xp: 10,
-    detectRange: 20,
+    detectRange: 14,
   },
   Orc: {
     label: 'Orc',
     hp: 80, damage: 15, speed: 2.5, attackRate: 1.5, attackRange: 2.0,
     color: 0x16a34a, size: [0.55, 1.5, 0.55], xp: 30,
-    detectRange: 25,
+    detectRange: 18,
   },
   DarkKnight: {
     label: 'Chevalier Noir',
     hp: 200, damage: 30, speed: 3.5, attackRate: 1.2, attackRange: 2.0,
     color: 0x1e1b4b, size: [0.6, 2.0, 0.6], xp: 80,
-    detectRange: 30,
+    detectRange: 22,
   },
 };
 
@@ -701,18 +701,28 @@ class Enemy {
       return;
     }
 
-    // Find closest target
+    // Find closest target. Detection is now bounded both horizontally (a sane
+    // detectRange — no more locking on from across the map) AND vertically: an
+    // enemy can't sense a target more than ~6 units above/below it, so surface
+    // mobs no longer chase a player who has descended into a cave (and vice
+    // versa). Once locked on, a leash (detectRange × 1.5) lets the enemy finish
+    // a short pursuit but it gives up rather than tracking forever.
     let closestDist = Infinity, closestTarget = null;
+    const leash = this.def.detectRange * 1.5;
     for (const t of targets) {
       if (!t || t.isDead) continue;
       const dx = t.position.x - this.position.x;
       const dz = t.position.z - this.position.z;
+      const dy = (t.position.y || 0) - (this.position.y || 0);
+      if (Math.abs(dy) > 6) continue;                 // different vertical layer (cave vs surface)
       const d = Math.sqrt(dx*dx + dz*dz);
-      if (d < closestDist && d < this.def.detectRange) {
+      const limit = (this._aggroTarget === t) ? leash : this.def.detectRange;
+      if (d < closestDist && d < limit) {
         closestDist = d;
         closestTarget = t;
       }
     }
+    this._aggroTarget = closestTarget;
 
     if (closestTarget) {
       // Move toward target

@@ -57,8 +57,9 @@ python3 -m http.server 8000
 - **Eat** before your hunger hits zero — once it does, you start **starving** and lose health over time (watch for the on-screen warning).
 - **Survive the night.** Enemies spawn in waves after dark. Build walls, craft armor, and fight back.
 - **Sleep.** Craft a **bed**, place it at night with **P**, and sleep through to morning to skip the danger.
-- **Explore caves.** Find a cave mouth and **walk down its sloped ramp** into a real underground system of roomy, well-lit **grey-stone chambers and walkable branching corridors** — then stroll right back up into daylight when you're done. The richest ores (coal, iron, gold) and **glowing crystals** are deep inside. Your **head-torch** lights automatically underground, and a soft fill light in every chamber keeps the whole room readable so it's easy to find your way around.
+- **Explore caves.** Find a cave mouth and **walk down its sloped ramp** into a real underground system of enclosed **chambers and branching tunnels** — then stroll right back up into daylight when you're done. The richest ores (coal, iron, gold) and **glowing crystals** are deep inside. It's dark down there — your **head-torch** lights automatically once you're underground.
 - **Fight with feel.** You can see your **hand and held item** on screen; attacking plays a swing. Enemies **flash, get knocked back, and show damage numbers** when you hit them.
+- **Gear up.** Open your inventory to find an **Armor** slot and an **Off-hand** slot (shield, torch, or a quick-access food). Click an item, then click the slot to equip it; equipped armor automatically reduces the damage you take. Click an equipped slot with nothing selected to take the item back.
 
 ## Progression at a glance
 

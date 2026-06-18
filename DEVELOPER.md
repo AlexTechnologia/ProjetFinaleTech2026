@@ -92,19 +92,6 @@ every chamber/tunnel/ramp volume containing the point — critical where a shall
 overlaps a deep chamber, so the player is never pinned to the shallower ceiling. `isInside`
 is simply `sampleCaves(...) != null`.
 
-**Cave proportions & readability (4.1).** Chambers are sized for comfortable standing headroom
-(main hall ≈7.5–10, satellites ≈7–9.5) while staying **below the 12-unit "open" threshold** so
-the `_move` head-clamp always treats them as enclosed rooms; tunnels are **walkable-width
-corridors** (radius ≈3.4–4.8). These are enforced by navigability unit tests. Rendering in
-`main.js _buildCaves` matches: lighter **cool blue-grey stone** (`0xb0b4c4`), a **soft cool fill
-light per chamber** (`0x9fb0d8`, drawn from a shared `lightBudget`) so whole rooms are readable,
-gentle wall/dome jitter (so rock looks rough, not spiky), and tunnels **trimmed to the chamber
-rims** with a flat floor strip so a passage reads as a mouth in the wall. Underground lighting
-(`_updateCaveAtmosphere`) uses a **near-white head-torch** (`0xfff1e0`) plus a steady cool
-ambient fill (`0x6b76a0` @ 0.6) and lighter cool fog — the combination is what keeps grey stone
-reading as grey rather than the muddy brown a lone orange torch produced. The cave ambient tint
-is reset to the surface tone (`0x404080`) on exit so it never leaks onto the overworld.
-
 In `main.js` `_move`, horizontal containment is **wall-aware**: a step leaving the carved
 volume is reverted only when the terrain outside sits well above the player's feet (a wall);
 stepping onto open ground at/below the feet — walking up the ramp mouth into daylight — is
@@ -136,7 +123,10 @@ stubs (the game never touches WebGL at load time) and asserts on real data and l
 5. **Crafting system** — craft consumes ingredients & yields the result, stacking merges, consumables clamp.
 6. **World determinism** — same seed → identical world; different seed → different world.
 7. **Caves & terrain** — heights/cave depths are finite & in range, grottos exist, and all coal/gold ore spawns inside grotto zones with valid drops.
-8. **Real cave systems (`VCCaves`)** — structure & branching (≥5 chambers, integer tunnel indices, graph connectivity), union-extent sampling, walkable tunnel midpoints, wall containment, the **entrance ramp** (mouth/inner geometry, open-topped ceiling, ramp-floor descent mouth→chamber, NaN-geometry regression), and **navigability invariants** (chamber headroom ≥6 yet <12 so the head-clamp engages, tunnels ≥3.0 radius). **896 assertions** total.
+8. **Real cave systems (`VCCaves`)** — structure & branching (≥5 chambers, integer tunnel indices, graph connectivity), union-extent sampling, walkable tunnel midpoints, wall containment, the **entrance ramp** (mouth/inner geometry, open-topped ceiling, ramp-floor descent mouth→chamber, NaN-geometry regression), and the **ceiling clamp** (every chamber ceiling stays below the surface with ≥6 headroom, and no non-entrance chamber exposes open cave volume above ground — the fix for "floating clouds" and walking out the top of the world).
+9. **Inventory equipment slots** — `equipSlotFor`/`canEquipTo` classification (armor→armor slot, shield/consumable→off-hand, materials rejected), `equipTo`/`unequip` transitions including swap-back-to-bag and full-inventory guards, and serialize/deserialize round-tripping the equipment state (plus legacy saves with no equipment field).
+
+**920 assertions** total.
 
 ### Headless player-physics simulation
 

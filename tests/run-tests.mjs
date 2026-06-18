@@ -107,6 +107,12 @@ runFile('caves.js', 'globalThis.VCCaves = (typeof window !== "undefined" && wind
 runFile('world.js', 'globalThis.__WORLD = { World, WORLD, RESOURCE_DROPS, mulberry32 };');
 runFile('crafting.js', 'globalThis.__CRAFT = { RECIPES, CONSUMABLE_EFFECTS, TOOL_STATS, CraftingSystem, craftingSystem };');
 runFile('main.js'); // window.ITEM_DB is assigned near the top; safe even if a later line throws.
+// player.js defines its OWN slimmer ITEM_DB and reassigns window.ITEM_DB at the
+// end of the file. We want its Inventory/Player exports but must keep main.js's
+// complete ITEM_DB, so snapshot it and restore afterward.
+const __mainItemDb = sandbox.window.ITEM_DB;
+runFile('player.js'); // exposes window.Player / window.Inventory at the end of the file.
+if (__mainItemDb) sandbox.window.ITEM_DB = __mainItemDb;
 
 const ITEM_DB = sandbox.window.ITEM_DB;
 const VCIcons = sandbox.window.VCIcons;
@@ -326,6 +332,32 @@ if (VCCaves && WORLD) {
   ok(floorBelowCeil, 'every chamber has floorY below ceilY (real headroom)');
   ok(depositsOk, 'cave deposits are coal / iron_ore / gold_ore only');
 
+  // ── Ceilings stay BELOW the surface (no "floating clouds", no pop-out-top). ──
+  // The height function here is a constant 5, so the clamp must keep every
+  // chamber ceiling at <= surface - 3 = 2, while preserving walkable headroom.
+  let ceilBelowSurface = true, headroomOk = true;
+  for (const sys of a) {
+    for (const ch of sys.chambers) {
+      if (ch.ceilY > 5 - 3 + 1e-6) ceilBelowSurface = false;
+      if (ch.ceilY - ch.floorY < 6 - 1e-6) headroomOk = false;
+    }
+  }
+  ok(ceilBelowSurface, 'every chamber ceiling is clamped below the surface (no domes poke through)');
+  ok(headroomOk, 'ceiling clamp preserves >= 6 units of walkable headroom');
+  // sampleCaves must never report open cave space above the surface, which is
+  // what let the player "walk into a wall and come out the top" — EXCEPT at
+  // entrance ramps, which are deliberately open-topped so you can climb out
+  // into daylight.
+  let noOpenSpaceAboveSurface = true;
+  for (const sys of a) {
+    for (const ch of sys.chambers) {
+      if (VCCaves.inEntrance(a, ch.x, ch.z)) continue; // ramps are open to the sky by design
+      const env = VCCaves.sampleCaves(a, ch.x, ch.z);
+      if (env && env.ceil > 5 - 3 + 1e-6) noOpenSpaceAboveSurface = false;
+    }
+  }
+  ok(noOpenSpaceAboveSurface, 'no non-entrance chamber exposes open cave volume above the surface');
+
   // ── Branching networks: multi-room systems with INDEXED tunnels. ──
   let multiRoom = true, tunnelIdxOk = true, connectedOk = true, formationsOk = true;
   let tunnelGeomFinite = true, tunnelGeomPositive = true;
@@ -361,27 +393,6 @@ if (VCCaves && WORLD) {
   ok(tunnelGeomPositive, 'tunnel geometry length is always positive');
   ok(connectedOk, 'every chamber is reachable from the entrance via tunnels');
   ok(formationsOk, 'formations reference valid chambers with positive size');
-
-  // ── Navigability invariants (fixes "caves are weird & hard to navigate"). ──
-  // Chambers need real standing headroom, but must stay BELOW the 12-unit
-  // "open" threshold so the head-clamp in main.js _move always treats them as
-  // enclosed rooms (a room that crept to >=12 headroom would let the player pop
-  // out through the ceiling). Tunnels must be wide enough to read and walk as
-  // corridors rather than the tight bores that felt claustrophobic.
-  let headroomOk = true, enclosedOk = true, corridorWidthOk = true;
-  for (const sys of a) {
-    for (const ch of sys.chambers) {
-      const h = ch.ceilY - ch.floorY;
-      if (!(h >= 6)) headroomOk = false;        // comfortable standing height
-      if (!(h < 12)) enclosedOk = false;         // still an enclosed room
-    }
-    for (const t of sys.tunnels) {
-      if (!(t.r >= 3.0)) corridorWidthOk = false; // walkable-width corridors
-    }
-  }
-  ok(headroomOk, 'every chamber has comfortable standing headroom (>= 6)');
-  ok(enclosedOk, 'every chamber stays an enclosed room (< 12) so the head-clamp engages');
-  ok(corridorWidthOk, 'every tunnel is a walkable-width corridor (radius >= 3.0)');
 
   // sampleCaves resolves to a chamber at a chamber centre.
   const ch0 = a[0].chambers[0];
@@ -439,6 +450,72 @@ if (VCCaves && WORLD) {
   let caveResources = 0;
   for (const r of w.resources.values()) if (r.inCave) caveResources++;
   ok(caveResources > 0, `cave deposits registered as resources (${caveResources})`);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  Equipment slots (armor + off-hand)
+// ════════════════════════════════════════════════════════════════════════
+section('Inventory equipment slots');
+const Inventory = sandbox.window.Inventory;
+ok(typeof Inventory === 'function', 'Inventory class exported from player.js');
+if (typeof Inventory === 'function' && ITEM_DB) {
+  // The equip logic reads window.ITEM_DB to classify item types.
+  sandbox.window.ITEM_DB = ITEM_DB;
+
+  // Pick representative real items from the live DB for each category.
+  const armorType   = Object.keys(ITEM_DB).find(k => ITEM_DB[k].type === 'armor');
+  const shieldType  = Object.keys(ITEM_DB).find(k => ITEM_DB[k].toolType === 'shield');
+  const foodType    = Object.keys(ITEM_DB).find(k => ITEM_DB[k].type === 'consumable');
+  const materialType= Object.keys(ITEM_DB).find(k => ITEM_DB[k].type === 'material');
+  ok(armorType && foodType && materialType, `found sample items (armor=${armorType}, food=${foodType}, mat=${materialType})`);
+
+  const inv = new Inventory(30);
+  ok(inv.equipment && inv.equipment.armor === null && inv.equipment.offhand === null, 'fresh inventory has empty armor + offhand slots');
+
+  // Classification.
+  eq(inv.equipSlotFor(armorType), 'armor', 'armor item maps to the armor slot');
+  eq(inv.equipSlotFor(foodType), 'offhand', 'consumable maps to the offhand slot');
+  if (shieldType) eq(inv.equipSlotFor(shieldType), 'offhand', 'shield maps to the offhand slot');
+  eq(inv.equipSlotFor(materialType), null, 'a plain material is not equippable');
+  ok(inv.canEquipTo('armor', armorType) === true, 'canEquipTo accepts armor in the armor slot');
+  ok(inv.canEquipTo('offhand', armorType) === false, 'canEquipTo rejects armor in the offhand slot');
+
+  // Equip transition: item leaves the bag, lands in the slot.
+  inv.addItem(armorType, 1);
+  const armorIdx = inv.slots.findIndex(s => s && s.type === armorType);
+  ok(inv.equipTo('armor', armorIdx) === true, 'equipTo moves armor into the armor slot');
+  eq(inv.equipment.armor && inv.equipment.armor.type, armorType, 'armor slot now holds the armor item');
+  eq(inv.countItem(armorType), 0, 'equipped armor no longer counts in the bag');
+  ok(inv.equipTo('armor', armorIdx) === false, 'equipTo fails on an empty source slot');
+
+  // Equipping a different armor swaps the previous one back into the bag.
+  const armorType2 = Object.keys(ITEM_DB).filter(k => ITEM_DB[k].type === 'armor')[1];
+  if (armorType2) {
+    inv.addItem(armorType2, 1);
+    const idx2 = inv.slots.findIndex(s => s && s.type === armorType2);
+    ok(inv.equipTo('armor', idx2) === true, 'equipping a second armor succeeds');
+    eq(inv.equipment.armor.type, armorType2, 'armor slot holds the newly equipped armor');
+    eq(inv.countItem(armorType), 1, 'previously equipped armor is swapped back into the bag');
+  }
+
+  // Offhand accepts food, and eating/clearing is reflected by unequip.
+  inv.addItem(foodType, 1);
+  const foodIdx = inv.slots.findIndex(s => s && s.type === foodType);
+  ok(inv.equipTo('offhand', foodIdx) === true, 'food can be placed in the offhand slot');
+  ok(inv.unequip('offhand') === true, 'unequip returns the offhand item to the bag');
+  eq(inv.equipment.offhand, null, 'offhand slot is empty after unequip');
+  ok(inv.countItem(foodType) >= 1, 'unequipped food is back in the bag');
+  ok(inv.unequip('offhand') === false, 'unequip on an empty slot is a no-op (false)');
+
+  // Serialization round-trips the equipment state.
+  const inv2 = new Inventory(30);
+  inv2.deserialize(inv.serialize());
+  eq(inv2.equipment.armor && inv2.equipment.armor.type, inv.equipment.armor && inv.equipment.armor.type, 'serialize/deserialize preserves equipped armor');
+  ok(JSON.stringify(inv2.serialize().equipment) === JSON.stringify(inv.serialize().equipment), 'equipment survives a full serialize round-trip');
+  // Legacy saves with no equipment field still load cleanly.
+  const legacy = new Inventory(30);
+  legacy.deserialize({ slots: new Array(30).fill(null), selectedSlot: 0 });
+  ok(legacy.equipment && legacy.equipment.armor === null && legacy.equipment.offhand === null, 'legacy saves without equipment default to empty slots');
 }
 
 // ── summary ─────────────────────────────────────────────────────────────

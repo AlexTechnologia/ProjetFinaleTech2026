@@ -129,9 +129,8 @@
       const baseFloor = -5 - rng() * 6;
       const chambers = [{
         x: ex, z: ez, r: 11 + rng() * 5,
-        // Tall, airy ceiling (≈7.5–10 headroom) so the main hall feels like a
-        // real cavern to move through, not a crawlspace — but still under the
-        // 12-unit "open" threshold so the head-clamp treats it as a sealed room.
+        // Tall, airy ceilings (≈7.5–10 of headroom) so the main hall feels like
+        // a cavern you can comfortably move through, not a crawlspace.
         floorY: baseFloor, ceilY: baseFloor + 7.5 + rng() * 2.5,
         depth: 0,
       }];
@@ -160,19 +159,36 @@
         const cr = 8 + rng() * 5;
         const idx = chambers.push({
           x: cx, z: cz, r: cr,
-          // Roomy satellite chambers (≈7–9.5 headroom) — comfortable to stand
-          // and walk in, still enclosed rooms (< 12) so the head-clamp engages.
+          // Roomy satellite chambers (≈7–9.5 headroom) — still enclosed rooms
+          // (under the 12-unit "open" threshold) so the head-clamp engages.
           floorY: cFloor, ceilY: cFloor + 7 + rng() * 2.5,
           depth: from.depth + 1,
         }) - 1;
-        // Wide corridors (≈3.4–4.8 radius) so tunnels read and walk as proper
-        // passages instead of the tight bores that felt claustrophobic.
+        // Wide corridors (≈3.4–4.8 radius) so tunnels read as walkable passages
+        // rather than tight bores you squeeze through.
         tunnels.push({ a: parentIdx, b: idx, r: 3.4 + rng() * 1.4 });
+      }
+
+      // — Keep every ceiling safely BELOW the local surface —
+      // A chamber whose ceilY pokes above the terrain caused two bugs: the dome
+      // rendered as a "floating cloud" above the grass, and its open interior
+      // extended above ground so the player could walk into a wall and pop out
+      // the top. Clamp each ceiling to (surface − CEIL_MARGIN); if that would
+      // crush headroom, drop the floor instead so rooms stay walkable. Uses no
+      // rng() calls, so determinism (and the world-gen tests) is preserved.
+      const CEIL_MARGIN = 3, MIN_HEADROOM = 6;
+      for (const ch of chambers) {
+        const surfH = getHeightAt ? getHeightAt(ch.x, ch.z) : Infinity;
+        const maxCeil = surfH - CEIL_MARGIN;
+        if (ch.ceilY > maxCeil) {
+          ch.ceilY = maxCeil;
+          if (ch.ceilY - ch.floorY < MIN_HEADROOM) ch.floorY = ch.ceilY - MIN_HEADROOM;
+        }
       }
 
       const sys = {
         id: systems.length,
-        entrance: { x: ex, z: ez, r: 2.8, surfaceY: surf, floorY: baseFloor, mouth, inner },
+        entrance: { x: ex, z: ez, r: 3.6, surfaceY: surf, floorY: baseFloor, mouth, inner },
         chambers,
         tunnels,
       };
