@@ -38,8 +38,9 @@
         const rr = rng() * Math.max(0.5, c.r - 1.6);
         const roll = rng();
         let type;
-        if (roll < 0.45 - depthBias * 0.2) type = 'coal';
-        else if (roll < 0.8 - depthBias * 0.1) type = 'iron_ore';
+        if (roll < 0.35) type = 'rock';
+        else if (roll < 0.65 - depthBias * 0.2) type = 'coal';
+        else if (roll < 0.90 - depthBias * 0.1) type = 'iron_ore';
         else type = 'gold_ore';
         out.push({
           chamber: ci,
@@ -126,12 +127,12 @@
       if (systems.some(s => Math.hypot(s.entrance.x - ex, s.entrance.z - ez) < 42)) continue;
 
       // — Main chamber, fed by a walkable ramp down from the surface —
-      const baseFloor = -5 - rng() * 6;
+      const baseFloor = -10 - rng() * 8;
       const chambers = [{
-        x: ex, z: ez, r: 11 + rng() * 5,
-        // Tall, airy ceilings (≈7.5–10 of headroom) so the main hall feels like
-        // a cavern you can comfortably move through, not a crawlspace.
-        floorY: baseFloor, ceilY: baseFloor + 7.5 + rng() * 2.5,
+        x: ex, z: ez, r: 25 + rng() * 15,
+        // Tall, airy ceilings so the main hall feels like
+        // a huge cavern you can comfortably move through.
+        floorY: baseFloor, ceilY: baseFloor + 18 + rng() * 10,
         depth: 0,
       }];
       const c0 = chambers[0];
@@ -151,22 +152,20 @@
         const parentIdx = Math.floor(rng() * chambers.length);
         const from = chambers[parentIdx];
         const a = rng() * TAU;
-        const d = 12 + rng() * 12;
+        const d = 30 + rng() * 20;
         const cx = from.x + Math.cos(a) * d;
         const cz = from.z + Math.sin(a) * d;
         // Deeper the further we branch from the surface.
-        const cFloor = from.floorY - (1.5 + rng() * 4.5);
-        const cr = 8 + rng() * 5;
+        const cFloor = from.floorY - (2.0 + rng() * 6.0);
+        const cr = 20 + rng() * 15;
         const idx = chambers.push({
           x: cx, z: cz, r: cr,
-          // Roomy satellite chambers (≈7–9.5 headroom) — still enclosed rooms
-          // (under the 12-unit "open" threshold) so the head-clamp engages.
-          floorY: cFloor, ceilY: cFloor + 7 + rng() * 2.5,
+          // Roomy satellite chambers.
+          floorY: cFloor, ceilY: cFloor + 15 + rng() * 8,
           depth: from.depth + 1,
         }) - 1;
-        // Wide corridors (≈3.4–4.8 radius) so tunnels read as walkable passages
-        // rather than tight bores you squeeze through.
-        tunnels.push({ a: parentIdx, b: idx, r: 3.4 + rng() * 1.4 });
+        // Wide corridors so tunnels read as walkable passages.
+        tunnels.push({ a: parentIdx, b: idx, r: 8 + rng() * 4 });
       }
 
       // — Keep every ceiling safely BELOW the local surface —
@@ -176,7 +175,7 @@
       // the top. Clamp each ceiling to (surface − CEIL_MARGIN); if that would
       // crush headroom, drop the floor instead so rooms stay walkable. Uses no
       // rng() calls, so determinism (and the world-gen tests) is preserved.
-      const CEIL_MARGIN = 3, MIN_HEADROOM = 6;
+      const CEIL_MARGIN = 4, MIN_HEADROOM = 10;
       for (const ch of chambers) {
         const surfH = getHeightAt ? getHeightAt(ch.x, ch.z) : Infinity;
         const maxCeil = surfH - CEIL_MARGIN;
@@ -188,7 +187,7 @@
 
       const sys = {
         id: systems.length,
-        entrance: { x: ex, z: ez, r: 3.6, surfaceY: surf, floorY: baseFloor, mouth, inner },
+        entrance: { x: ex, z: ez, r: 12.0, surfaceY: surf, floorY: baseFloor, mouth, inner },
         chambers,
         tunnels,
       };

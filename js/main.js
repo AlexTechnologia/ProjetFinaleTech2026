@@ -1621,13 +1621,17 @@ class VeilCraftGame {
       if (t === 'rock') key = ['rock_a', 'rock_b', 'rock_c'][Math.floor(Math.random() * 3)];
       if (key && window.VCAssets.has(key)) {
         const built = window.VCAssets.buildModel(key, _RES_MODEL[1] * s);
-        // Only accept a model that actually contains a renderable mesh. If the
-        // GLB failed to load (e.g. a 404 on a host) `built` can be truthy yet
-        // empty, which would leave invisible trees/rocks. Falling through to the
-        // procedural shapes below guarantees something always renders.
         let hasMesh = false;
         if (built && built.object) built.object.traverse(o => { if (o.isMesh) hasMesh = true; });
-        if (hasMesh) { built.object.rotation.y = Math.random() * Math.PI * 2; g.add(built.object); return g; }
+        if (hasMesh) { 
+          built.object.rotation.y = Math.random() * Math.PI * 2; 
+          g.add(built.object); 
+          g.position.set(res.position.x, res.position.y || 0, res.position.z);
+          g.userData.networkId = res.networkId;
+          g.userData.resourceType = t;
+          g.userData.isResource = true;
+          return g; 
+        }
       }
     }
 
