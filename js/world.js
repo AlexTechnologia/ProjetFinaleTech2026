@@ -44,14 +44,12 @@ const WORLD = {
   SIZE: 400,          // Taille de l'île en unités Three.js
   ISLAND_RADIUS: 180,  // Rayon de l'île (le reste = eau)
   RESOURCES: {
-    oak_tree:    { count: 120, health: 50,  scale: 1.0 },
+    oak_tree:    { count: 160, health: 50,  scale: 1.0 },
     birch_tree:  { count: 80,  health: 40,  scale: 0.9 },
     dark_oak:    { count: 40,  health: 80,  scale: 1.3 },
     rock:        { count: 120, health: 60,  scale: 1.0 },
     iron_ore:    { count: 50,  health: 80,  scale: 0.8 },
     flint_node:  { count: 60,  health: 30,  scale: 0.6 },
-    gold_ore:    { count: 15,  health: 90,  scale: 1.0 },
-    cave_entrance:{ count: 6,  health: 9999,scale: 1.5 },
     pink_shroom: { count: 30,  health: 1,   scale: 0.4 },
     red_shroom:  { count: 30,  health: 1,   scale: 0.4 },
     yellow_shroom:{ count: 30, health: 1,   scale: 0.4 },
@@ -144,16 +142,6 @@ class World {
           mesh: null, // Sera assigné par entities.js
         };
         this.resources.set(networkId, resource);
-        
-        // Match cave entrances with a corresponding exit in the deep dimension
-        if (type === 'cave_entrance') {
-          const cy = this.getCaveFloorAt(x, z);
-          const exitId = `res_${idCounter++}`;
-          this.resources.set(exitId, {
-            networkId: exitId, type: 'cave_exit', position: { x, y: cy, z },
-            health: 9999, maxHealth: 9999, scale: 1.5, mesh: null
-          });
-        }
       }
     }
     // ── Cave/grotto ores: coal, gold and extra iron concentrated inside the
@@ -184,28 +172,36 @@ class World {
       }
     }
 
-    // ── Deep Cave Resources ─────────────────────────
-    const deepOres = [
-      { type: 'pink_shroom', count: 60, health: 1, scale: 0.6 },
-      { type: 'yellow_shroom', count: 60, health: 1, scale: 0.6 },
-      { type: 'gold_ore', count: 50, health: 95, scale: 1.0 },
-      { type: 'iron_ore', count: 100, health: 80, scale: 1.0 },
-    ];
-    for (const cfg of deepOres) {
-      for (let i = 0; i < cfg.count; i++) {
-        const x = (this.rng() - 0.5) * WORLD.SIZE * 0.9;
-        const z = (this.rng() - 0.5) * WORLD.SIZE * 0.9;
-        const y = this.getCaveFloorAt(x, z);
-        const networkId = `res_${idCounter++}`;
-        this.resources.set(networkId, {
-          networkId, type: cfg.type, position: { x, y, z },
-          health: cfg.health, maxHealth: cfg.health,
-          scale: cfg.scale * (0.8 + this.rng() * 0.4), mesh: null,
-        });
+    // ── Real cave systems: deterministic underground chambers + tunnels with an
+    //    entrance crater carved into the surface. Generated AFTER the surface
+    //    passes so getHeightAt() reflects final hill/mountain heights. Each ore
+    //    deposit is registered as a normal minable resource so the existing
+    //    mining / drop / network pipeline handles it for free.
+    this.caveSystems = [];
+    if (typeof VCCaves !== 'undefined' && VCCaves.generateCaveSystems) {
+      this.caveSystems = VCCaves.generateCaveSystems(
+        this.rng,
+        (x, z) => this.getHeightAt(x, z),
+        { count: 5, islandRadius: WORLD.ISLAND_RADIUS },
+      );
+      for (const sys of this.caveSystems) {
+        for (const dep of sys.deposits) {
+          const networkId = `cave_${idCounter++}`;
+          this.resources.set(networkId, {
+            networkId,
+            type: dep.type,
+            position: { x: dep.x, y: dep.y, z: dep.z },
+            health: dep.health,
+            maxHealth: dep.health,
+            scale: 0.85,
+            mesh: null,
+            inCave: true,
+          });
+        }
       }
     }
 
-    console.log(`[World] Monde généré — seed: ${seed}, ressources: ${this.resources.size}`);
+    console.log(`[World] Monde généré — seed: ${seed}, ressources: ${this.resources.size}, grottes: ${this.caveSystems.length}`);
     return this;
   }
 
@@ -220,8 +216,6 @@ class World {
     if (!resource || this.destroyedIds.has(networkId)) {
       return { destroyed: false, drops: [] };
     }
-
-    if (resource.type === 'cave_entrance' || resource.type === 'cave_exit') return { destroyed: false, drops: [] };
 
     resource.health -= damage;
     
@@ -273,21 +267,6 @@ class World {
     return this.caveDepth(x, z) > 0.25;
   }
 
-  // Retourne la hauteur du sol de la dimension souterraine profonde
-  getCaveFloorAt(x, z) {
-    if (!this.noise1) return -1000;
-    const n1 = this.noise1(x * 0.02, z * 0.02);
-    const n2 = this.noise2(x * 0.05, z * 0.05);
-    return -1000 + (n1 * 12) + (n2 * 5);
-  }
-
-  // Retourne la hauteur du plafond de la dimension souterraine
-  getCaveCeilingAt(x, z) {
-    if (!this.noise3) return -970;
-    const n3 = this.noise3(x * 0.02, z * 0.02);
-    return -970 + (n3 * 15);
-  }
-
   getHeightAt(x, z) {
     if (!this.noise1) return 0;
     const dist = Math.hypot(x, z);
@@ -328,7 +307,27 @@ class World {
     // Gentle sea floor beyond the shoreline.
     if (dist > R) h = -3 - (dist - R) * 0.08;
     if (h < -4) h = -4;
+
+    // Entrance craters descend below the normal terrain floor so the player can
+    // walk down from the surface into a real, enclosed cave system.
+    if (this.caveSystems && this.caveSystems.length && typeof VCCaves !== 'undefined') {
+      const ec = VCCaves.entranceCarve(this.caveSystems, x, z);
+      if (ec > 0) h -= ec;
+    }
     return h;
+  }
+
+  // Cave collision sampling for the player: returns { floor, ceil, system, kind }
+  // when (x,z) is inside a chamber/tunnel footprint, else null.
+  getCaveEnv(x, z) {
+    if (!this.caveSystems || !this.caveSystems.length || typeof VCCaves === 'undefined') return null;
+    return VCCaves.sampleCaves(this.caveSystems, x, z);
+  }
+
+  // True inside an open entrance crater (daylight reaches; ceiling is open).
+  inCaveEntrance(x, z) {
+    if (!this.caveSystems || !this.caveSystems.length || typeof VCCaves === 'undefined') return false;
+    return VCCaves.inEntrance(this.caveSystems, x, z);
   }
 
   // Vérifie si une position est sur l'île

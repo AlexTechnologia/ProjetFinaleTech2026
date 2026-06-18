@@ -57,14 +57,27 @@
     return loader;
   }
 
-  function loadOne(key) {
+  function loadOne(key, attempt) {
+    attempt = attempt || 0;
     return new Promise((resolve) => {
       const l = getLoader();
       if (!l || !FILES[key]) { resolve(false); return; }
       let settled = false;
-      const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
-      // Safety timeout so a stuck request never blocks the loading screen.
-      const timer = setTimeout(() => { console.warn('[Assets] timeout', key); done(false); }, 15000);
+      const done = (ok) => {
+        if (settled) return;
+        settled = true;
+        // One automatic retry handles the cold-cache / first-paint stalls that
+        // are common on GitHub Pages, where the first model fetch can be slow.
+        if (!ok && attempt < 1) {
+          console.warn('[Assets] retrying', key, '(attempt', attempt + 2, 'of 2)');
+          resolve(loadOne(key, attempt + 1));
+        } else {
+          resolve(ok);
+        }
+      };
+      // Generous timeout so a slow (but working) request never blocks the
+      // loading screen on a fresh GitHub Pages deploy.
+      const timer = setTimeout(() => { console.warn('[Assets] timeout', key, '(attempt', attempt + 1, ')'); done(false); }, 30000);
       try {
         l.load(BASE + FILES[key], (gltf) => {
           clearTimeout(timer);
@@ -88,7 +101,7 @@
             scene.traverse((o) => {
               if (o.isMesh || o.isSkinnedMesh) {
                 o.castShadow = true;
-                o.frustumCulled = false;
+                o.frustumCulled = true;
                 if (Array.isArray(o.material)) o.material.forEach(fixMat);
                 else fixMat(o.material);
               }
@@ -137,25 +150,10 @@
     if (!entry) return null;
     try {
       const obj = cloneScene(entry);
-      
-      // Use pre-computed bounding box properties from load time!
-      // Cloning (especially with SkeletonUtils) doesn't always preserve world matrices immediately,
-      // which would result in Infinity bounds and microscopic/infinite scaling.
-      const height = Math.max(0.01, entry.height);
-      const s = targetHeight ? (targetHeight / height) : 1;
-
-      // Wrap the object to preserve its original scale/rotation
-      const pivot = new THREE.Group();
-      const wrapper = new THREE.Group();
-      
-      pivot.add(obj);
-      // Shift pivot so the bottom of the bounding box is at Y=0 locally
-      pivot.position.y = -entry.minY;
-      
-      wrapper.add(pivot);
-      wrapper.scale.setScalar(s);
-
-      return { object: wrapper, animations: entry.animations, scale: s };
+      const s = targetHeight ? (targetHeight / entry.height) : 1;
+      obj.scale.setScalar(s);
+      obj.position.y = -entry.minY * s; // drop feet/base to y=0
+      return { object: obj, animations: entry.animations, scale: s };
     } catch (e) {
       console.warn('[Assets] build fail', key, e);
       return null;

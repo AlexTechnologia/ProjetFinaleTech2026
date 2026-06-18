@@ -869,3 +869,26 @@ img.vc-icon, .vc-icon { width: 30px; height: 30px; object-fit: contain; filter: 
 
 /* Damage-number cause tag (Famine / Chute / ⚔). */
 .damage-number .dmg-cause { font-size: 0.62rem; opacity: 0.85; margin-left: 0.15rem; }
+
+
+/* ── Enemy floating damage numbers (world-space, projected to screen) ── */
+.enemy-damage-number {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  color: #ff5544;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.85), 0 0 6px rgba(255,60,40,0.6);
+  pointer-events: none;
+  user-select: none;
+  z-index: 50;
+  will-change: transform, opacity;
+  animation: enemyDmgFloat 0.85s ease-out forwards;
+}
+@keyframes enemyDmgFloat {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  15%  { opacity: 1; transform: translate(-50%, -72%) scale(1.18); }
+  100% { opacity: 0; transform: translate(-50%, -155%) scale(1.0); }
+}

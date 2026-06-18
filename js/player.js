@@ -133,8 +133,6 @@ const ITEM_DB = {
   'Anvil':           { icon: '⚫', type: 'structure', desc: 'Enclume pour armes avancées.' },
   'Fletching Table': { icon: '🏹', type: 'structure', desc: 'Table de flèches.' },
   'Cauldron':        { icon: '🫕', type: 'structure', desc: 'Chaudron de cuisine.' },
-  'Bed':             { icon: '🛏️', type: 'structure', desc: 'Permet de passer la nuit et définir son point de réapparition.' },
-  'Chest':           { icon: '🧰', type: 'structure', desc: 'Permet de stocker des objets de façon permanente.' },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -488,11 +486,7 @@ class Player {
     // Ground collision
     let groundY = 0;
     if (world) {
-      if (this.position.y < -100) {
-        groundY = world.getCaveFloorAt(this.position.x, this.position.z);
-      } else {
-        groundY = world.getHeightAt(this.position.x, this.position.z);
-      }
+      groundY = world.getHeightAt(this.position.x, this.position.z);
     }
 
     if (this.position.y <= groundY + this.height) {
@@ -561,86 +555,17 @@ class Player {
       this.toolGroup.position.z = -0.6;
     }
     
-    // Update tool visual geometry
-    this._updateToolModel();
-  }
-
-  _updateToolModel() {
+    // Update tool color based on selected item
     const item = this.inventory.getSelectedItem();
     const type = item?.type || 'Fists';
-    
-    // Only rebuild if the equipped item type changed
-    if (this._currentToolType === type) return;
-    this._currentToolType = type;
-
-    // Clear old model
-    while(this.toolGroup.children.length > 0) {
-      this.toolGroup.remove(this.toolGroup.children[0]);
-    }
-
-    // Base hand (Player skin)
-    const handMat = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.8 });
-    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), handMat);
-    
-    // Position hand in bottom right of view
-    // The toolGroup itself is moved during swing animations
-    hand.position.set(0.3, -0.3, -0.2); 
-    // Rotate arm slightly inward
-    hand.rotation.y = -0.2;
-    hand.rotation.x = 0.2;
-    this.toolGroup.add(hand);
-
-    if (type === 'Fists') return;
-
-    // Material colors
-    let headColor = 0x888888;
-    const typeStr = String(type).toLowerCase();
-    if (typeStr.includes('wood')) headColor = 0x8b4513;
-    else if (typeStr.includes('stone') || typeStr.includes('rock')) headColor = 0x666666;
-    else if (typeStr.includes('iron')) headColor = 0xaaaaaa;
-    else if (typeStr.includes('steel')) headColor = 0xc0c0c0;
-    else if (typeStr.includes('gold')) headColor = 0xffd700;
-
-    const stickMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
-    const headMat = new THREE.MeshStandardMaterial({ color: headColor, roughness: 0.6, metalness: typeStr.includes('wood')?0:0.4 });
-
-    const toolRoot = new THREE.Group();
-    // Attach tool exactly to the hand's end
-    toolRoot.position.set(0.3, -0.3, -0.4);
-    toolRoot.rotation.copy(hand.rotation);
-
-    if (typeStr.includes('pickaxe')) {
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8), stickMat);
-      handle.rotation.x = Math.PI / 2; handle.position.z = -0.2;
-      toolRoot.add(handle);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.08), headMat);
-      head.position.set(0, 0, -0.5);
-      toolRoot.add(head);
-    } else if (typeStr.includes('axe')) {
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.7), stickMat);
-      handle.rotation.x = Math.PI / 2; handle.position.z = -0.15;
-      toolRoot.add(handle);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.25, 0.3), headMat);
-      head.position.set(0.1, 0, -0.4);
-      toolRoot.add(head);
-    } else if (typeStr.includes('sword')) {
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3), stickMat);
-      handle.rotation.x = Math.PI / 2; handle.position.z = 0;
-      toolRoot.add(handle);
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.06), headMat);
-      guard.position.set(0, 0, -0.15);
-      toolRoot.add(guard);
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.8), headMat);
-      blade.position.set(0, 0, -0.55);
-      toolRoot.add(blade);
-    } else {
-      // Generic item box held in hand
-      const itemBox = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), headMat);
-      itemBox.position.z = -0.1;
-      toolRoot.add(itemBox);
-    }
-    
-    this.toolGroup.add(toolRoot);
+    let color = 0xd2b48c; // default fist skin color
+    if (type.includes('Wood')) color = 0x8b4513;
+    else if (type.includes('Stone') || type.includes('Rock')) color = 0x888888;
+    else if (type.includes('Iron')) color = 0xaaaaaa;
+    else if (type.includes('Gold')) color = 0xffd700;
+    else if (type.includes('Diamond')) color = 0x00ffff;
+    else if (type.includes('Sword')) color = 0xcccccc;
+    this.toolMesh.material.color.setHex(color);
   }
 
   _doAttack() {
@@ -706,18 +631,12 @@ class Player {
     this.health = this.maxHealth * 0.5;
     this.hunger = 60;
     this.stamina = 60;
-    
-    if (this.respawnPoint) {
-      this.position.set(this.respawnPoint.x, this.respawnPoint.y, this.respawnPoint.z);
-    } else {
-      // Respawn at center
-      this.position.set(
-        (Math.random() - 0.5) * 10,
-        5,
-        (Math.random() - 0.5) * 10
-      );
-    }
-    
+    // Respawn at center
+    this.position.set(
+      (Math.random() - 0.5) * 10,
+      5,
+      (Math.random() - 0.5) * 10
+    );
     this.velocity.set(0, 0, 0);
     if (this.onRespawn) this.onRespawn();
   }

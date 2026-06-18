@@ -100,13 +100,18 @@ function runFile(file, captureTail = '') {
 }
 
 runFile('icons.js');
+// Caves must load before world.js so world.generate() can see VCCaves. In the
+// vm sandbox, window.VCCaves does not create a bare global, so we promote it
+// onto the context global explicitly (mirrors the browser, where it is global).
+runFile('caves.js', 'globalThis.VCCaves = (typeof window !== "undefined" && window.VCCaves) ? window.VCCaves : (typeof VCCaves !== "undefined" ? VCCaves : undefined); globalThis.__CAVES = globalThis.VCCaves;');
 runFile('world.js', 'globalThis.__WORLD = { World, WORLD, RESOURCE_DROPS, mulberry32 };');
 runFile('crafting.js', 'globalThis.__CRAFT = { RECIPES, CONSUMABLE_EFFECTS, TOOL_STATS, CraftingSystem, craftingSystem };');
 runFile('main.js'); // window.ITEM_DB is assigned near the top; safe even if a later line throws.
 
 const ITEM_DB = sandbox.window.ITEM_DB;
 const VCIcons = sandbox.window.VCIcons;
-const { World, WORLD, RESOURCE_DROPS } = sandbox.__WORLD || {};
+const { World, WORLD, RESOURCE_DROPS, mulberry32 } = sandbox.__WORLD || {};
+const VCCaves = sandbox.__CAVES;
 const { RECIPES, CONSUMABLE_EFFECTS, TOOL_STATS, CraftingSystem } = sandbox.__CRAFT || {};
 
 const RARITIES = new Set(['common', 'uncommon', 'rare', 'epic', 'legendary']);
@@ -271,16 +276,77 @@ if (World) {
   ok((byType.gold_ore || 0) > 0, `gold ore generated (${byType.gold_ore || 0})`);
   let oresInCaves = true;
   for (const r of w.resources.values()) {
+    // Skip deposits placed by the new VCCaves chamber system (validated below);
+    // this check covers only the legacy grotto-zone ore placement.
+    if (r.inCave) continue;
     if (r.type === 'coal' || r.type === 'gold_ore') {
       if (w.caveDepth(r.position.x, r.position.z) < 0.3) oresInCaves = false;
     }
   }
-  ok(oresInCaves, 'all coal & gold ore spawned inside grotto zones');
+  ok(oresInCaves, 'all legacy coal & gold ore spawned inside grotto zones');
   // drops resolve to real items
   for (const t of ['coal', 'gold_ore', 'iron_ore']) {
     const drops = RESOURCE_DROPS[t] ? RESOURCE_DROPS[t]() : [];
     ok(drops.length > 0 && drops.every(d => ITEM_DB[d.type] != null), `'${t}' drops valid items`);
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+section('Real cave systems (VCCaves)');
+if (VCCaves && WORLD) {
+  ok(typeof VCCaves.generateCaveSystems === 'function', 'VCCaves.generateCaveSystems exists');
+  ok(typeof VCCaves.sampleCaves === 'function', 'VCCaves.sampleCaves exists');
+  ok(typeof VCCaves.inEntrance === 'function', 'VCCaves.inEntrance exists');
+  ok(typeof VCCaves.entranceCarve === 'function', 'VCCaves.entranceCarve exists');
+
+  const mk = (seed) => {
+    const rng = mulberry32(seed);
+    return VCCaves.generateCaveSystems(rng, () => 5, { count: 5, islandRadius: WORLD.ISLAND_RADIUS });
+  };
+  const a = mk(42), b = mk(42), c = mk(99);
+  ok(Array.isArray(a) && a.length === 5, `generates requested count (${a && a.length})`);
+  ok(JSON.stringify(a) === JSON.stringify(b), 'generation is deterministic for a fixed seed');
+  ok(JSON.stringify(a) !== JSON.stringify(c), 'different seeds yield different cave layouts');
+
+  // Structural sanity on every system.
+  let structureOk = true, floorBelowCeil = true, depositsOk = true;
+  for (const sys of a) {
+    if (!sys.entrance || !Array.isArray(sys.chambers) || sys.chambers.length < 1) structureOk = false;
+    if (!Array.isArray(sys.tunnels) || !Array.isArray(sys.deposits) || !Array.isArray(sys.crystals)) structureOk = false;
+    for (const ch of sys.chambers || []) {
+      if (!(ch.floorY < ch.ceilY)) floorBelowCeil = false;
+    }
+    for (const d of sys.deposits || []) {
+      if (!['coal', 'iron_ore', 'gold_ore'].includes(d.type)) depositsOk = false;
+    }
+  }
+  ok(structureOk, 'every system has entrance, chambers, tunnels, deposits, crystals');
+  ok(floorBelowCeil, 'every chamber has floorY below ceilY (real headroom)');
+  ok(depositsOk, 'cave deposits are coal / iron_ore / gold_ore only');
+
+  // sampleCaves resolves to a chamber at a chamber centre.
+  const ch0 = a[0].chambers[0];
+  const env = VCCaves.sampleCaves(a, ch0.x, ch0.z);
+  ok(env && env.floor < env.ceil, 'sampleCaves returns enclosed floor/ceil at a chamber centre');
+  const farEnv = VCCaves.sampleCaves(a, 99999, 99999);
+  ok(farEnv === null, 'sampleCaves returns null far from any cave');
+
+  // Entrance detection + carve.
+  ok(VCCaves.inEntrance(a, a[0].entrance.x, a[0].entrance.z) === true, 'inEntrance true at an entrance');
+  ok(VCCaves.inEntrance(a, 99999, 99999) === false, 'inEntrance false far away');
+  ok(VCCaves.entranceCarve(a, a[0].entrance.x, a[0].entrance.z) > 0, 'entranceCarve digs a crater at the entrance');
+  eq(VCCaves.entranceCarve(a, 99999, 99999), 0, 'entranceCarve is 0 far from any entrance');
+
+  // World integration: generate() populates caveSystems and cave ores.
+  const w = new World();
+  w.generate(42);
+  ok(Array.isArray(w.caveSystems) && w.caveSystems.length === 5, `world.generate populates caveSystems (${w.caveSystems.length})`);
+  const wch = w.caveSystems[0].chambers[0];
+  ok(w.getCaveEnv(wch.x, wch.z) != null, 'world.getCaveEnv returns an env inside a chamber');
+  ok(w.inCaveEntrance(w.caveSystems[0].entrance.x, w.caveSystems[0].entrance.z) === true, 'world.inCaveEntrance true at entrance');
+  let caveResources = 0;
+  for (const r of w.resources.values()) if (r.inCave) caveResources++;
+  ok(caveResources > 0, `cave deposits registered as resources (${caveResources})`);
 }
 
 // ── summary ─────────────────────────────────────────────────────────────

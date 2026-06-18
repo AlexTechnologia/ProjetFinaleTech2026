@@ -27,24 +27,6 @@ const RECIPES = [
     description: 'Permet de crafter des outils avancés'
   },
   {
-    id: 'bed',
-    name: 'Lit',
-    icon: '🛏️',
-    workstation: null,
-    ingredients: [{ type: 'wood', count: 10 }, { type: 'wheat', count: 5 }],
-    result: { type: 'bed', count: 1 },
-    description: 'Permet de passer la nuit et définir son point de réapparition'
-  },
-  {
-    id: 'chest',
-    name: 'Coffre',
-    icon: '🧰',
-    workstation: null,
-    ingredients: [{ type: 'wood', count: 15 }],
-    result: { type: 'chest', count: 1 },
-    description: 'Permet de stocker des objets (Non fonctionnel UI complet)'
-  },
-  {
     id: 'cooked_meat',
     name: 'Viande cuite',
     icon: '🍖',

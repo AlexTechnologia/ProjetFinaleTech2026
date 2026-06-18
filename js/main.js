@@ -189,6 +189,9 @@ class Enemy {
     this.onDeath   = onDeath;
     this.attackCd  = 0;
     this.scene     = scene;
+    this._knockback = new THREE.Vector3(); // decaying hit knockback (x/z)
+    this._flashMats = null;                // materials we tint red on hit
+    this._flashTO   = null;
 
     // Mesh — real animated character model if available, else procedural humanoid.
     const g = new THREE.Group();
@@ -259,6 +262,15 @@ class Enemy {
     this.mesh = g;
     this.position = g.position;
 
+    // Collect materials we can briefly flash red when struck (skip the basic
+    // health-bar / glowing-eye materials, which have no emissive channel).
+    this._flashMats = [];
+    g.traverse((o) => {
+      if (o.isMesh && o !== hpBar && o.material && o.material.emissive) {
+        this._flashMats.push({ m: o.material, e: o.material.emissive.getHex(), i: o.material.emissiveIntensity || 0 });
+      }
+    });
+
     this._updateHPBar();
   }
 
@@ -272,10 +284,41 @@ class Enemy {
     this._hpTex.needsUpdate = true;
   }
 
-  takeDamage(amount) {
+  // Briefly tint every body material red, then restore.
+  _flash() {
+    if (!this._flashMats || !this._flashMats.length) return;
+    for (const f of this._flashMats) {
+      f.m.emissive.setHex(0xff4433);
+      f.m.emissiveIntensity = 0.95;
+      f.m.needsUpdate = true;
+    }
+    clearTimeout(this._flashTO);
+    this._flashTO = setTimeout(() => {
+      if (!this._flashMats) return;
+      for (const f of this._flashMats) {
+        f.m.emissive.setHex(f.e);
+        f.m.emissiveIntensity = f.i;
+        f.m.needsUpdate = true;
+      }
+    }, 120);
+  }
+
+  takeDamage(amount, hitDir) {
     if (this.isDead) return;
     this.health -= amount;
     this._updateHPBar();
+    this._flash();
+
+    // Knockback: shove the enemy along the hit direction (attacker → enemy).
+    if (hitDir && this._knockback) {
+      this._knockback.set(hitDir.x, 0, hitDir.z);
+      if (this._knockback.lengthSq() > 1e-6) this._knockback.normalize().multiplyScalar(3.4);
+    }
+
+    // Floating world-space damage number over the enemy.
+    const gi = window.gameInstance;
+    if (gi && gi._showEnemyDamage) gi._showEnemyDamage(this.mesh ? this.mesh.position : this.position, amount);
+
     if (window.audio) window.audio.playEnemyHit();
     if (this.health <= 0) this.die();
   }
@@ -301,6 +344,14 @@ class Enemy {
     if (this.isDead || !this.mesh) return;
     if (this._mixer) this._mixer.update(dt);
     if (this._hpBar && window.gameCamera) this._hpBar.quaternion.copy(window.gameCamera.quaternion);
+
+    // Apply & decay hit knockback.
+    if (this._knockback && this._knockback.lengthSq() > 1e-4) {
+      this.mesh.position.x += this._knockback.x * dt;
+      this.mesh.position.z += this._knockback.z * dt;
+      this._knockback.multiplyScalar(Math.max(0, 1 - dt * 6));
+      if (this._knockback.lengthSq() < 0.01) this._knockback.set(0, 0, 0);
+    }
 
     const w = window.gameInstance?.world;
     if (w) this.mesh.position.y = w.getHeightAt(this.mesh.position.x, this.mesh.position.z);
@@ -579,17 +630,67 @@ class PlayerAdapter {
 
     // PointerLock controls inline
     this.controls = this._buildControls(camera, domElement);
-    // Held item
+    // First-person view model: a persistent hand + a swappable held item, with
+    // a real swing animation driven every frame.
     this.heldItemContainer = new THREE.Group();
-    this.heldItemContainer.position.set(0.5, -0.4, -0.8);
+    this._vmBasePos = new THREE.Vector3(0.55, -0.45, -0.8);
+    this._vmBaseRot = new THREE.Euler(0, 0, 0);
+    this.heldItemContainer.position.copy(this._vmBasePos);
     this.camera.add(this.heldItemContainer);
+    this.handGroup = this._buildHand();
+    this.itemGroup = new THREE.Group();
+    this.heldItemContainer.add(this.handGroup);
+    this.heldItemContainer.add(this.itemGroup);
+    this._swingT = 1; // 1 = idle, set to 0 to start a swing
     this.updateHeldItem();
 
     this._setupInput(domElement);
   }
 
+  // A simple low-poly forearm + fist so the player always sees their hand.
+  _buildHand() {
+    const g = new THREE.Group();
+    const skin   = new THREE.MeshStandardMaterial({ color: 0xE3A87C, roughness: 0.85, metalness: 0 });
+    const sleeve = new THREE.MeshStandardMaterial({ color: 0x5A4632, roughness: 0.9, metalness: 0 });
+    const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.55), sleeve);
+    forearm.position.set(0.02, -0.17, 0.2);
+    forearm.rotation.x = 0.18;
+    g.add(forearm);
+    const fist = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.17, 0.19), skin);
+    fist.position.set(0.0, -0.06, -0.05);
+    g.add(fist);
+    return g;
+  }
+
+  // Start a swing (attack / mine).
+  triggerSwing() { this._swingT = 0; }
+
+  // Drive the swing arc and gentle idle sway of the view model.
+  _updateViewModel(dt) {
+    const c = this.heldItemContainer;
+    if (!c) return;
+    if (this._swingT < 1) {
+      this._swingT = Math.min(1, this._swingT + dt / 0.26);
+      const s = Math.sin(this._swingT * Math.PI); // 0 → 1 → 0
+      c.rotation.x = this._vmBaseRot.x - s * 1.25;
+      c.rotation.z = this._vmBaseRot.z + s * 0.35;
+      c.position.x = this._vmBasePos.x - s * 0.18;
+      c.position.y = this._vmBasePos.y - s * 0.12;
+      c.position.z = this._vmBasePos.z + s * 0.10;
+    } else {
+      const k = Math.min(1, dt * 12);
+      const sway = Math.sin(this.headBobTime) * 0.012;
+      c.rotation.x += (this._vmBaseRot.x - c.rotation.x) * k;
+      c.rotation.z += (this._vmBaseRot.z - c.rotation.z) * k;
+      c.position.x += (this._vmBasePos.x - c.position.x) * k;
+      c.position.y += (this._vmBasePos.y + sway - c.position.y) * k;
+      c.position.z += (this._vmBasePos.z - c.position.z) * k;
+    }
+  }
+
   updateHeldItem() {
-    this.heldItemContainer.clear();
+    if (!this.itemGroup) return;
+    while (this.itemGroup.children.length) this.itemGroup.remove(this.itemGroup.children[0]);
     const item = this.inventory.getSelectedItem();
     if (!item) return;
     const db = window.ITEM_DB?.[item.type];
@@ -622,7 +723,7 @@ class PlayerAdapter {
         mesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshLambertMaterial({ color }));
       }
     }
-    this.heldItemContainer.add(mesh);
+    this.itemGroup.add(mesh);
   }
 
   _buildControls(camera, el) {
@@ -703,6 +804,7 @@ class PlayerAdapter {
       const now = performance.now() / 1000;
       if (now - this._lastAttack < 0.4) return;
       this._lastAttack = now;
+      this.triggerSwing();
       if (this.onAttack) {
         const item = this.inventory.getSelectedItem();
         const db   = item ? window.ITEM_DB?.[item.type] : null;
@@ -767,6 +869,7 @@ class PlayerAdapter {
     this._move(dt, getHeight);
     this._stats(dt);
     this._headBob(dt);
+    this._updateViewModel(dt);
     this.camera.position.copy(this.position);
     this.camera.position.y += this.headBobAmt;
   }
@@ -798,9 +901,36 @@ class PlayerAdapter {
     this.position.z += this.velocity.z * safeDt;
 
     if (getHeight) {
-      const groundY = getHeight(this.position.x, this.position.z) + 1.7;
+      const EYE = 1.7;
+      const surf = getHeight(this.position.x, this.position.z);
+      let groundY = surf + EYE;
+      let ceilCap = Infinity;
+      this._inCave = false;
+
+      // Real caves: when our feet drop below a chamber ceiling we stand on the
+      // cave floor instead of the terrain above, and a ceiling clamp stops us
+      // popping up through solid rock. The open entrance crater uses the carved
+      // terrain so we can walk back out into daylight.
+      const w = window.gameInstance?.world;
+      const cave = w && w.getCaveEnv ? w.getCaveEnv(this.position.x, this.position.z) : null;
+      if (cave) {
+        const open = w.inCaveEntrance(this.position.x, this.position.z);
+        const feet = this.position.y - EYE;
+        if (!open && feet < cave.ceil + 0.3) {
+          groundY = cave.floor + EYE;
+          ceilCap = cave.ceil - 0.1;
+          this._inCave = this.position.y < (surf - 1.0);
+        }
+      }
+
       if (this.position.y <= groundY) { this.position.y = groundY; this.velocity.y = 0; this.onGround = true; }
       else { this.onGround = this.position.y - groundY < 0.2; }
+
+      // Cave ceiling collision.
+      if (ceilCap !== Infinity && this.position.y > ceilCap) {
+        this.position.y = ceilCap;
+        if (this.velocity.y > 0) this.velocity.y = 0;
+      }
     }
 
     const dist = Math.hypot(this.position.x, this.position.z);
@@ -910,9 +1040,7 @@ class VeilCraftGame {
     this.roomCode   = p.get('room') || sessionStorage.getItem('vc_room') || null;
     this.playerName = sessionStorage.getItem('vc_name') || 'Aventurier';
     const s         = sessionStorage.getItem('vc_seed');
-    let parsedSeed  = parseInt(s);
-    if (isNaN(parsedSeed)) parsedSeed = Math.floor(Math.random() * 999999) + 1;
-    this.seed       = parsedSeed;
+    this.seed       = s ? parseInt(s) : Math.floor(Math.random() * 999999) + 1;
     console.log(`[Game] mode=${this.mode} room=${this.roomCode} seed=${this.seed}`);
   }
 
@@ -971,6 +1099,13 @@ class VeilCraftGame {
     moonLight.position.set(-50, 40, -50);
     this.scene.add(moonLight);
     this._moonLight = moonLight;
+
+    // Player head-torch: a warm point light that follows the camera and only
+    // lights up when the player is underground in a real cave.
+    this.torchLight = new THREE.PointLight(0xffb169, 0.0, 20, 1.8);
+    this.torchLight.position.set(0, 1.6, 0);
+    this.scene.add(this.torchLight);
+    this._inCaveAtmosphere = false;
 
     // Sun mesh
     this.sunMesh = new THREE.Mesh(new THREE.SphereGeometry(4,12,12), new THREE.MeshBasicMaterial({ color: 0xfff176 }));
@@ -1085,55 +1220,6 @@ class VeilCraftGame {
     this.scene.add(this._terrainMesh);
   }
 
-  _buildCaveTerrainMesh() {
-    if (this._caveFloorMesh) { this.scene.remove(this._caveFloorMesh); this._caveFloorMesh.geometry.dispose(); }
-    if (this._caveCeilMesh) { this.scene.remove(this._caveCeilMesh); this._caveCeilMesh.geometry.dispose(); }
-    
-    const seg = 100, sz = 350;
-    
-    // Cave Floor
-    let fGeo = new THREE.PlaneGeometry(sz, sz, seg, seg);
-    fGeo.rotateX(-Math.PI / 2);
-    const fPos = fGeo.attributes.position;
-    for (let i = 0; i < fPos.count; i++) {
-      const x = fPos.getX(i), z = fPos.getZ(i);
-      const y = this.world ? this.world.getCaveFloorAt(x, z) : -1000;
-      fPos.setY(i, y);
-    }
-    fGeo = fGeo.toNonIndexed();
-    fGeo.computeVertexNormals();
-    const fColors = new Float32Array(fGeo.attributes.position.count * 3);
-    for (let i = 0; i < fColors.length; i += 3) { fColors[i]=0.2; fColors[i+1]=0.2; fColors[i+2]=0.22; }
-    fGeo.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
-    this._caveFloorMesh = new THREE.Mesh(fGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
-    this.scene.add(this._caveFloorMesh);
-
-    // Cave Ceiling
-    let cGeo = new THREE.PlaneGeometry(sz, sz, seg, seg);
-    cGeo.rotateX(Math.PI / 2); // facing down
-    const cPos = cGeo.attributes.position;
-    for (let i = 0; i < cPos.count; i++) {
-      const x = cPos.getX(i), z = cPos.getZ(i);
-      const y = this.world ? this.world.getCaveCeilingAt(x, z) : -970;
-      cPos.setY(i, y);
-    }
-    cGeo = cGeo.toNonIndexed();
-    cGeo.computeVertexNormals();
-    const cColors = new Float32Array(cGeo.attributes.position.count * 3);
-    for (let i = 0; i < cColors.length; i += 3) { cColors[i]=0.15; cColors[i+1]=0.15; cColors[i+2]=0.17; }
-    cGeo.setAttribute('color', new THREE.BufferAttribute(cColors, 3));
-    this._caveCeilMesh = new THREE.Mesh(cGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1.0 }));
-    this.scene.add(this._caveCeilMesh);
-
-    // Cave Water
-    this._caveWaterMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(sz, sz).rotateX(-Math.PI/2),
-      new THREE.MeshLambertMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
-    );
-    this._caveWaterMesh.position.y = -998.5; // Slightly above average floor
-    this.scene.add(this._caveWaterMesh);
-  }
-
   // ─── SUBSYSTEMS ─────────────────────────────────
   _initSubsystems() {
     this.ui = new UI();
@@ -1190,21 +1276,8 @@ class VeilCraftGame {
       if (e.code === 'KeyE' && !this.ui.chatOpen) {
         if (this.ui.inventoryOpen) { this.ui.closeInventory(); }
         else {
-          const special = this._getNearbySpecialResource();
           const ws = this._getNearbyWorkstation();
-          if (special === 'cave_entrance') {
-            this.player.position.y = this.world.getCaveFloorAt(this.player.position.x, this.player.position.z) + 1.7;
-            this.ui.showPickup('🌌 Entrée dans les profondeurs...');
-            if (window.audio) window.audio.playHitRock();
-          } else if (special === 'cave_exit') {
-            this.player.position.y = this.world.getHeightAt(this.player.position.x, this.player.position.z) + 1.7;
-            this.ui.showPickup('☀️ Retour à la surface...');
-            if (window.audio) window.audio.playHitRock();
-          } else if (ws === 'bed') {
-            this._sleep();
-          } else {
-            this.ui.openInventory(this.player, this.crafting, ws);
-          }
+          this.ui.openInventory(this.player, this.crafting, ws);
         }
         e.preventDefault();
       }
@@ -1237,7 +1310,6 @@ class VeilCraftGame {
       this.remotePlayers.set(peerId, { name, color, ping: 0, mesh: this._buildRemotePlayerMesh(color, name || (peerId ? peerId.substring(0, 8) : 'Joueur')) });
       this.ui.addChatMessage('Système', `${name || peerId.substring(0,8)} a rejoint!`, '#86efac');
       this._updatePlayerTab();
-      this._updateLobbyPlayers();
     };
 
     this.network.onPlayerLeft = (peerId) => {
@@ -1246,7 +1318,6 @@ class VeilCraftGame {
       this.remotePlayers.delete(peerId);
       this.ui.addChatMessage('Système', 'Un joueur a quitté.', '#fca5a5');
       this._updatePlayerTab();
-      this._updateLobbyPlayers();
     };
 
     this.network.onMessage = (type, data, fromId) => this._handleMsg(type, data, fromId);
@@ -1267,9 +1338,6 @@ class VeilCraftGame {
 
   _handleMsg(type, data, fromId) {
     switch(type) {
-      case '__START_GAME__':
-        this._beginGameFromLobby();
-        break;
       case MSG.WORLD_SYNC:
         if (this.mode === 'join' && data && !this._worldSynced) {
           this._worldSynced = true;
@@ -1277,8 +1345,8 @@ class VeilCraftGame {
           this.world.generate(data.seed);
           if (data.worldData) this.world.deserialize(data.worldData);
           this._buildTerrainMesh();
-          this._buildCaveTerrainMesh();
           this._buildResourceMeshes();
+          this._buildCaves();
           this.dayNumber = data.dayNumber || 1;
           this.dayTime   = data.dayTime   || 0;
           this.isNight   = data.isNight   || false;
@@ -1399,6 +1467,7 @@ class VeilCraftGame {
           this.world.generate(this.seed);
           this._buildTerrainMesh();
           this._buildResourceMeshes();
+          this._buildCaves();
         }
       }, 10000);
       return;
@@ -1408,10 +1477,10 @@ class VeilCraftGame {
 
     this.ui.setLoadingProgress(75, 'Construction du terrain…');
     this._buildTerrainMesh();
-    this._buildCaveTerrainMesh();
 
     this.ui.setLoadingProgress(85, 'Placement des ressources…');
     this._buildResourceMeshes();
+    this._buildCaves();
 
     this.ui.setLoadingProgress(90, 'Apparition des animaux…');
     this.pigs = [];
@@ -1553,24 +1622,6 @@ class VeilCraftGame {
         }
         break;
       }
-      case 'cave_entrance': {
-        const frame = new THREE.Mesh(new THREE.TorusGeometry(1*s, 0.2*s, 8, 16), mat(0x444444));
-        frame.rotation.x = -Math.PI / 2; frame.position.y = 0.1*s; g.add(frame);
-        const hole = new THREE.Mesh(new THREE.CircleGeometry(1*s, 16), new THREE.MeshBasicMaterial({ color: 0x000000 }));
-        hole.rotation.x = -Math.PI / 2; hole.position.y = 0.05*s; g.add(hole);
-        const light = new THREE.PointLight(0xa78bfa, 0.8, 10);
-        light.position.y = 2*s; g.add(light);
-        break;
-      }
-      case 'cave_exit': {
-        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.2*s, 1.2*s, 0.2*s, 16), mat(0x222222));
-        pad.position.y = 0.1*s; g.add(pad);
-        const glow = new THREE.Mesh(new THREE.CylinderGeometry(1*s, 1*s, 0.22*s, 16), new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.5 }));
-        glow.position.y = 0.1*s; g.add(glow);
-        const light = new THREE.PointLight(0xa78bfa, 1.5, 15);
-        light.position.y = 2*s; g.add(light);
-        break;
-      }
       default: {
         const def = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), mat(0xAAAAAA));
         def.position.y = 0.2; g.add(def);
@@ -1602,20 +1653,7 @@ class VeilCraftGame {
     this.ui.setLoadingProgress(100, 'Prêt!');
     setTimeout(() => this.ui.hideLoadingScreen(), 600);
     this.isRunning = true;
-    
-    if (this.mode === 'host' || this.mode === 'join') {
-      this.isLobby = true;
-      const overlay = document.getElementById('lobby-overlay');
-      if (overlay) {
-        overlay.style.display = 'flex';
-        document.getElementById('lobby-room-code').textContent = 'Salle: ' + this.roomCode;
-        if (this.mode === 'host') document.getElementById('lobby-host-controls').style.display = 'block';
-        else document.getElementById('lobby-join-controls').style.display = 'block';
-      }
-      this._updateLobbyPlayers();
-    } else {
-      this.ui.showClickToPlay();
-    }
+    this.ui.showClickToPlay();
     this.ui.setConnectionStatus('online', this.mode === 'solo' ? 'Solo' : `Salle: ${this.roomCode}`);
     this._updatePlayerTab();
 
@@ -1643,7 +1681,7 @@ class VeilCraftGame {
       requestAnimationFrame(loop);
       const dt = Math.min((ts - this.lastTime) / 1000, 0.1);
       this.lastTime = ts;
-      if (this.isRunning && !this.isPaused && !this.isLobby) this._update(dt, ts);
+      if (this.isRunning && !this.isPaused) this._update(dt, ts);
       else if (this.player?.isDead) {
         this.player.update(dt, (x, z) => this.world ? this.world.getHeightAt(x, z) : 0);
         this.ui.updateDeathCountdown(this.player.respawnTimer);
@@ -1655,39 +1693,15 @@ class VeilCraftGame {
     requestAnimationFrame(loop);
   }
 
-  startMultiplayerGame() {
-    if (this.mode !== 'host') return;
-    this.network.broadcast('__START_GAME__', {});
-    this._beginGameFromLobby();
-  }
-
-  _beginGameFromLobby() {
-    this.isLobby = false;
-    const overlay = document.getElementById('lobby-overlay');
-    if (overlay) overlay.style.display = 'none';
-    this.ui.showClickToPlay();
-  }
-
-  _updateLobbyPlayers() {
-    const list = document.getElementById('lobby-player-list');
-    if (!list) return;
-    let html = `<div style="padding:0.5rem 1rem; background:rgba(255,255,255,0.1); border-radius:8px; border:1px solid #7c3aed;">👑 ${this.playerName || 'Hôte'}</div>`;
-    if (this.remotePlayers) {
-      this.remotePlayers.forEach((p, id) => {
-        html += `<div style="padding:0.5rem 1rem; background:rgba(255,255,255,0.1); border-radius:8px; border:1px solid rgba(255,255,255,0.2);">${p.name || id.substring(0,8)}</div>`;
-      });
-    }
-    list.innerHTML = html;
-  }
-
   _update(dt, ts) {
     // Player
-    this.player.update(dt, this.world);
+    this.player.update(dt, (x, z) => this.world ? this.world.getHeightAt(x, z) : 0);
     this.ui.updateHUD(this.player);
-    this._updateMinimap();
 
     // Day/night cycle
     this._updateDayNight(dt);
+    // Underground atmosphere + head-torch (overrides day/night while in a cave)
+    this._updateCaveAtmosphere(dt);
 
     // Wave manager
     this.waveManager.update(dt, this.player.position);
@@ -1752,14 +1766,9 @@ class VeilCraftGame {
 
     // Workstation Prompt
     const ws = this._getNearbyWorkstation();
-    const special = this._getNearbySpecialResource();
-    if ((ws || special) && this.ui.els.interactPrompt && !this.ui.inventoryOpen) {
+    if (ws && this.ui.els.interactPrompt && !this.ui.inventoryOpen) {
       this.ui.els.interactPrompt.style.display = 'block';
-      if (special) {
-        this.ui.els.interactText.textContent = special === 'cave_entrance' ? '[E] Entrer dans la grotte' : '[E] Sortir de la grotte';
-      } else {
-        this.ui.els.interactText.textContent = `[E] Utiliser ${(window.ITEM_DB && window.ITEM_DB[ws] && window.ITEM_DB[ws].name) || String(ws).replace(/_/g, ' ')}`;
-      }
+      this.ui.els.interactText.textContent = `[E] Utiliser ${(window.ITEM_DB && window.ITEM_DB[ws] && window.ITEM_DB[ws].name) || String(ws).replace(/_/g, ' ')}`;
     } else if (this.ui.els.interactPrompt) {
       this.ui.els.interactPrompt.style.display = 'none';
     }
@@ -1783,53 +1792,127 @@ class VeilCraftGame {
     }
   }
 
-  _updateMinimap() {
-    const canvas = document.getElementById('minimap-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    
-    // Scale and center around player
-    const scale = 2.0; // zoom level
-    const px = this.player.position.x;
-    const pz = this.player.position.z;
-    
-    // Helper to draw circle
-    const drawDot = (wx, wz, color, size) => {
-      const sx = w/2 + (wx - px) * scale;
-      const sy = h/2 + (wz - pz) * scale;
-      if (sx < -10 || sx > w+10 || sy < -10 || sy > h+10) return;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(sx, sy, size, 0, Math.PI*2);
-      ctx.fill();
-    };
+  // ─── CAVES ─────────────────────────────────────
+  // Build the visible geometry for the real cave systems generated in world.js:
+  // enclosed chambers (floor disc + wall cylinder + dome ceiling), connecting
+  // tunnels, and glowing crystals. The entrance chamber keeps an open ceiling so
+  // daylight pours into the crater you climb down through.
+  _buildCaves() {
+    if (this._caveGroup) { this.scene.remove(this._caveGroup); this._disposeGroup(this._caveGroup); }
+    this._caveGroup = new THREE.Group();
+    this._caveCrystals = [];
+    const systems = this.world && this.world.caveSystems ? this.world.caveSystems : [];
+    if (!systems.length) { this.scene.add(this._caveGroup); return; }
 
-    // Draw resources (green for trees, gray for rocks, orange for ores)
-    if (this.world && this.world.resources) {
-      for (const res of this.world.resources.values()) {
-        let col = '#22c55e'; // default green
-        if (res.type.includes('rock') || res.type.includes('stone') || res.type === 'FLINT_NODE' || res.type === 'ROCK') col = '#6b7280';
-        else if (res.type === 'IRON_ORE' || res.type === 'GOLD_ORE') col = '#f59e0b';
-        drawDot(res.position.x, res.position.z, col, 2);
-      }
+    const rockMat  = new THREE.MeshStandardMaterial({ color: 0x4a4658, roughness: 1.0, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x3a3742, roughness: 1.0, metalness: 0.0, flatShading: true });
+
+    let crystalLightBudget = 6; // cap dynamic lights for performance
+
+    for (const sys of systems) {
+      let placedSystemLight = false;
+      sys.chambers.forEach((ch, ci) => {
+        const isEntrance = (ci === 0);
+        // Floor disc.
+        const floor = new THREE.Mesh(new THREE.CircleGeometry(ch.r, 20), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.set(ch.x, ch.floorY, ch.z);
+        floor.receiveShadow = true;
+        this._caveGroup.add(floor);
+
+        // Wall cylinder (open-ended tube around the chamber).
+        const wallH = Math.max(2.5, ch.ceilY - ch.floorY);
+        const wall = new THREE.Mesh(new THREE.CylinderGeometry(ch.r, ch.r * 1.04, wallH, 20, 1, true), rockMat);
+        wall.position.set(ch.x, ch.floorY + wallH / 2, ch.z);
+        this._caveGroup.add(wall);
+
+        if (isEntrance) {
+          // Partial ring ceiling: leaves the centre open under the surface crater.
+          const ring = new THREE.Mesh(new THREE.RingGeometry(ch.r * 0.45, ch.r, 20), rockMat);
+          ring.rotation.x = Math.PI / 2;
+          ring.position.set(ch.x, ch.ceilY, ch.z);
+          this._caveGroup.add(ring);
+        } else {
+          // Full dome ceiling for satellite chambers (sealed underground).
+          const dome = new THREE.Mesh(new THREE.SphereGeometry(ch.r, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), rockMat);
+          dome.position.set(ch.x, ch.ceilY, ch.z);
+          this._caveGroup.add(dome);
+        }
+      });
+
+      // Tunnels: open horizontal cylinders linking chamber centres.
+      (sys.tunnels || []).forEach(t => {
+        const a = t.a, b = t.b;
+        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const len = Math.hypot(dx, dy, dz);
+        if (len < 0.1) return;
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(t.r, t.r, len, 12, 1, true), rockMat);
+        // Orient the cylinder (default +Y) along the segment direction.
+        const mid = new THREE.Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+        tube.position.copy(mid);
+        const dirv = new THREE.Vector3(dx, dy, dz).normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        tube.quaternion.setFromUnitVectors(up, dirv);
+        this._caveGroup.add(tube);
+      });
+
+      // Glowing crystals (emissive) — light a few of them for atmosphere.
+      (sys.crystals || []).forEach((cr, idx) => {
+        const hue = (cr.hue != null ? cr.hue : 0.55);
+        const col = new THREE.Color().setHSL(hue, 0.7, 0.55);
+        const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9, roughness: 0.4, metalness: 0.1, flatShading: true });
+        const geo = (idx % 2 === 0)
+          ? new THREE.ConeGeometry(0.18, cr.h || 0.8, 6)
+          : new THREE.IcosahedronGeometry((cr.h || 0.8) * 0.4, 0);
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(cr.x, cr.y + (cr.h || 0.8) * 0.5, cr.z);
+        this._caveGroup.add(m);
+        if (!placedSystemLight && crystalLightBudget > 0) {
+          const pl = new THREE.PointLight(col.getHex(), 0.8, 9, 2);
+          pl.position.set(cr.x, cr.y + 0.8, cr.z);
+          this._caveGroup.add(pl);
+          placedSystemLight = true;
+          crystalLightBudget--;
+        }
+      });
     }
 
-    // Draw enemies (red)
-    if (this.waveManager && this.waveManager.enemies) {
-      for (const e of this.waveManager.enemies) {
-        drawDot(e.position.x, e.position.z, '#ef4444', 3);
-      }
-    }
+    this.scene.add(this._caveGroup);
+    console.log('[Game] Grottes construites:', systems.length, 'systèmes');
+  }
 
-    // Draw peers (blue)
-    if (this.remotePlayers) {
-      for (const p of this.remotePlayers.values()) {
-        if (p.mesh) drawDot(p.mesh.position.x, p.mesh.position.z, '#3b82f6', 3);
+  _disposeGroup(g) {
+    if (!g) return;
+    g.traverse(o => {
+      if (o.geometry && o.geometry.dispose) o.geometry.dispose();
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => m && m.dispose && m.dispose());
       }
+    });
+  }
+
+  // Override the day/night lighting when the player is underground: dim the sun
+  // and ambient, darken/close in the fog, and switch on the head-torch. Called
+  // AFTER _updateDayNight each frame so it always wins while in a cave.
+  _updateCaveAtmosphere(dt) {
+    if (!this.player || !this.torchLight) return;
+    // Keep the torch on the player's head.
+    this.torchLight.position.set(this.camera.position.x, this.camera.position.y, this.camera.position.z);
+    const inCave = !!this.player._inCave;
+    // Smoothly ramp torch intensity so entering/leaving a cave isn't jarring.
+    const targetTorch = inCave ? 1.5 : 0.0;
+    this.torchLight.intensity += (targetTorch - this.torchLight.intensity) * Math.min(1, dt * 6);
+    if (inCave) {
+      this.sunLight.intensity   *= 0.12;
+      this.ambientLight.intensity = Math.max(this.ambientLight.intensity * 0.25, 0.06);
+      if (this.scene.fog) {
+        this.scene.fog.density = 0.06;
+        this.scene.fog.color.lerp(new THREE.Color(0x05060a), Math.min(1, dt * 4));
+      }
+      if (this.starField) this.starField.visible = false;
     }
+    this._inCaveAtmosphere = inCave;
   }
 
   _updateDayNight(dt) {
@@ -1862,9 +1945,9 @@ class VeilCraftGame {
     if (!this.isNight) {
       const td = t / dayFrac;
       let s = 1.0;
-      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.8; ambInt = s * 0.3 + 0.5; }
-      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.8; ambInt = s * 0.3 + 0.5; }
-      else { sunInt = 0.8; ambInt = 0.8; }
+      if (td < 0.15) { s = td / 0.15; sunInt = s * 0.8; ambInt = s * 0.4 + 0.1; }
+      else if (td > 0.85) { s = 1 - ((td - 0.85) / 0.15); sunInt = s * 0.8; ambInt = s * 0.3 + 0.1; }
+      else { sunInt = 0.8; ambInt = 0.4; }
       this.starField.visible = false;
     } else {
       sunInt = 0; ambInt = 0.5; this.starField.visible = true;
@@ -1933,10 +2016,8 @@ class VeilCraftGame {
   _onPlayerAttack(damage, toolType) {
     if (!this.player.isLocked) return;
 
-    if (this.player.heldItemContainer) {
-      this.player.heldItemContainer.rotation.x -= Math.PI / 4;
-      setTimeout(() => { if (this.player.heldItemContainer) this.player.heldItemContainer.rotation.x += Math.PI / 4; }, 150);
-    }
+    // The first-person swing animation is driven by the player view model.
+    if (this.player.triggerSwing) this.player.triggerSwing();
 
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
@@ -1965,8 +2046,38 @@ class VeilCraftGame {
     if (!t) return;
 
     if (t.kind === 'resource') this._hitResource(t.ref, damage, toolType);
-    else if (t.kind === 'enemy') { t.ref.takeDamage(damage); }
-    else if (t.kind === 'pig') { t.ref.takeDamage(damage); if (window.audio) window.audio.playHitWood(); }
+    else if (t.kind === 'enemy') {
+      const hitDir = t.ref.mesh
+        ? new THREE.Vector3().subVectors(t.ref.mesh.position, this.camera.position)
+        : null;
+      t.ref.takeDamage(damage, hitDir);
+    }
+    else if (t.kind === 'pig') {
+      const hitDir = t.ref.mesh
+        ? new THREE.Vector3().subVectors(t.ref.mesh.position, this.camera.position)
+        : null;
+      t.ref.takeDamage(damage, hitDir);
+      if (window.audio) window.audio.playHitWood();
+    }
+  }
+
+  // Floating world-space damage number over a struck enemy. Projects the world
+  // point to screen space; CSS animates it upward and fades it out.
+  _showEnemyDamage(worldPos, amount) {
+    if (!worldPos || !this.camera) return;
+    const v = worldPos.clone();
+    v.y += 1.9;
+    v.project(this.camera);
+    if (v.z > 1) return; // behind the camera
+    const x = (v.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    const el = document.createElement('div');
+    el.className = 'enemy-damage-number';
+    el.textContent = '-' + Math.round(amount);
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 850);
   }
 
   _toolEffectiveness(toolType, resType) {
@@ -2087,20 +2198,6 @@ class VeilCraftGame {
     return this.world.getNearbyWorkstation(pp, 4);
   }
 
-  _getNearbySpecialResource() {
-    if (!this.world || !this.world.resources) return null;
-    let closest = null;
-    let minDist = 6;
-    const px = this.player.position.x, py = this.player.position.y, pz = this.player.position.z;
-    this.world.resources.forEach(res => {
-      if (res.type === 'cave_entrance' || res.type === 'cave_exit') {
-        const d = Math.hypot(res.position.x - px, (res.position.y||0) - py, res.position.z - pz);
-        if (d < minDist) { minDist = d; closest = res.type; }
-      }
-    });
-    return closest;
-  }
-
   _placeStructure() {
     const item = this.player.inventory.getSelectedItem();
     if (!item) return;
@@ -2121,51 +2218,28 @@ class VeilCraftGame {
 
   // Skip the night by sleeping in a bed. Host-authoritative in multiplayer.
   _sleep() {
-    this.player.respawnPoint = { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z };
-
-    if (!this.isNight) { this.ui.showPickup("\ud83d\udecf\ufe0f Point de réapparition défini"); return; }
+    if (!this.isNight) { this.ui.showPickup("\ud83d\udecf\ufe0f Vous ne pouvez dormir que la nuit"); return; }
     if (this.network && this.network.isHost === false && !this.network.isSolo()) {
-      this.ui.showPickup("\ud83d\udecf\ufe0f Point de réapparition défini (Seul l\u2019h\u00f4te passe la nuit)"); return;
+      this.ui.showPickup("\ud83d\udecf\ufe0f Seul l\u2019h\u00f4te peut faire passer la nuit"); return;
     }
-    
-    // Create sleep fade element if not exists
-    let fade = document.getElementById('sleep-fade');
-    if (!fade) {
-      fade = document.createElement('div');
-      fade.id = 'sleep-fade';
-      fade.style.position = 'fixed'; fade.style.top = '0'; fade.style.left = '0';
-      fade.style.width = '100vw'; fade.style.height = '100vh';
-      fade.style.backgroundColor = 'black'; fade.style.zIndex = '9999';
-      fade.style.opacity = '0'; fade.style.transition = 'opacity 2s ease-in-out';
-      fade.style.pointerEvents = 'none';
-      document.body.appendChild(fade);
+    this.dayTime = 0;
+    this.isNight = false;
+    if (this.waveManager) { this.waveManager.isNight = false; this.waveManager.clearEnemies(); }
+    if (this.player) {
+      this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
+      this.player.stamina = this.player.maxStamina;
     }
-    
-    // Trigger animation
-    setTimeout(() => { fade.style.opacity = '1'; }, 10);
-    
-    setTimeout(() => {
-      this.dayTime = 0;
-      this.isNight = false;
-      if (this.waveManager) { this.waveManager.isNight = false; this.waveManager.clearEnemies(); }
-      if (this.player) {
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
-        this.player.stamina = this.player.maxStamina;
-      }
-      if (window.audio && window.audio.playDayStart) window.audio.playDayStart();
-      this.ui.showPickup("\ud83c\udf05 Point de réapparition défini. Vous avez dormi jusqu\u2019au matin");
-      
-      setTimeout(() => { fade.style.opacity = '0'; }, 1000);
-    }, 2000);
+    if (window.audio && window.audio.playDayStart) window.audio.playDayStart();
+    this.ui.showPickup("\ud83c\udf05 Vous avez dormi jusqu\u2019au matin");
   }
 
   _placeWorkstationMesh(type, pos) {
-    const COLORS = { campfire:0xFF6600, workbench:0x8B4513, furnace:0xFF4500, anvil:0x555555, cauldron:0x336699, fletching_table:0x8B6914, chest:0x6b4226, bed:0xff4444 };
+    const COLORS = { campfire:0xFF6600, workbench:0x8B4513, furnace:0xFF4500, anvil:0x555555, cauldron:0x336699, fletching_table:0x8B6914 };
     const color = COLORS[type] || 0xAAAAAA;
     const g = new THREE.Group();
     // Real model first; fall back to the procedural box below.
     const tkey = String(type).toLowerCase().replace(/ /g, '_');
-    const _wsHeight = { campfire:0.8, workbench:1.1, furnace:1.3, anvil:0.9, cauldron:1.0, fletching_table:1.1, chest:0.8, bed:0.6 }[tkey] || 1.0;
+    const _wsHeight = { campfire:0.8, workbench:1.1, furnace:1.3, anvil:0.9, cauldron:1.0, fletching_table:1.1 }[tkey] || 1.0;
     if (window.VCAssets && window.VCAssets.has(tkey)) {
       const built = window.VCAssets.buildModel(tkey, _wsHeight);
       if (built) {
@@ -2178,28 +2252,13 @@ class VeilCraftGame {
         return g;
       }
     }
-    
-    // Fallback meshes
-    if (type === 'chest') {
-      const b1 = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 0.6), new THREE.MeshLambertMaterial({ color }));
-      b1.position.y = 0.3; b1.castShadow = true; g.add(b1);
-      const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
-      b2.position.set(0, 0.3, 0.3); g.add(b2);
-    } else if (type === 'bed') {
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, 1.0), new THREE.MeshLambertMaterial({ color }));
-      p1.position.y = 0.15; p1.castShadow = true; g.add(p1);
-      const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.8), new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      p2.position.set(-0.6, 0.3, 0); g.add(p2);
-    } else {
-      const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.8), new THREE.MeshLambertMaterial({ color }));
-      box.position.y = 0.35; box.castShadow = true; g.add(box);
-      if (type === 'campfire') {
-        const fl = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xFF6600 }));
-        fl.position.y = 0.6; g.add(fl);
-        const pl = new THREE.PointLight(0xFF6600, 1.5, 8); pl.position.y = 0.7; g.add(pl);
-      }
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.8), new THREE.MeshLambertMaterial({ color }));
+    box.position.y = 0.35; box.castShadow = true; g.add(box);
+    if (type === 'campfire') {
+      const fl = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xFF6600 }));
+      fl.position.y = 0.6; g.add(fl);
+      const pl = new THREE.PointLight(0xFF6600, 1.5, 8); pl.position.y = 0.7; g.add(pl);
     }
-    
     g.position.set(pos.x, pos.y || 0, pos.z);
     this.scene.add(g);
   }

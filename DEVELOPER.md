@@ -16,7 +16,7 @@ This document explains how VeilCraft is put together so you can extend it safely
 ## Script load order (`game.html`)
 
 ```
-audio  →  save  →  crafting  →  network  →  world  →  entities  →  player  →  icons  →  ui  →  assets  →  main
+audio  →  save  →  crafting  →  network  →  caves  →  world  →  entities  →  player  →  icons  →  ui  →  assets  →  main
 ```
 
 Order matters: later files reference globals defined earlier (e.g. `ui.js` uses `window.VCIcons`
@@ -26,7 +26,8 @@ from `icons.js`, so `icons.js` loads first).
 
 | File | Responsibility |
 |------|----------------|
-| `js/world.js` | Seeded procedural generation (Mulberry32 + value noise). Island heightfield, resource scatter, **cave/grotto carving**, resource damage/drops, serialize/deserialize. |
+| `js/caves.js` | `VCCaves` — THREE-free, deterministic generation of enclosed **cave systems** (entrance crater, chambers, tunnels, ore deposits, crystals) and the sampling helpers (`sampleCaves`, `inEntrance`, `entranceCarve`) used by `world.js` and `main.js`. Loads before `world.js`. |
+| `js/world.js` | Seeded procedural generation (Mulberry32 + value noise). Island heightfield, resource scatter, **cave/grotto carving**, **cave-system integration + deposits** (via `VCCaves`), resource damage/drops, serialize/deserialize. |
 | `js/entities.js` | Legacy entity manager + `Enemy`, `WaveManager`, `Pig`. (Live resource meshes are built in `main.js`.) |
 | `js/player.js` | Player movement, stamina/hunger, inventory class, input. |
 | `js/crafting.js` | `RECIPES`, `CONSUMABLE_EFFECTS`, `TOOL_STATS`, and the `CraftingSystem` class. |

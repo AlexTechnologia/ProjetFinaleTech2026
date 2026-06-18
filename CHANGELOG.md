@@ -2,6 +2,35 @@
 
 All notable changes to VeilCraft.
 
+## [3.0] — Real caves, first-person hands & combat feedback
+
+This release delivers the headline roadmap items that were still missing: genuine enclosed
+caves, a visible first-person hand with swing animations, and clear hit feedback on enemies —
+plus a fix for 3D models failing to load on GitHub Pages.
+
+### Added
+- **Real caves (`js/caves.js`, `window.VCCaves`).** The world now contains 5 fully enclosed,
+  deterministic cave systems: a surface entrance crater you climb down through, a large main
+  chamber, 2–3 satellite chambers, and connecting tunnels. Chambers have solid floors, walls,
+  and domed ceilings; satellites are sealed underground while the entrance stays open to the sky.
+  Caves contain their own **coal, iron, and gold** deposits and **glowing crystals** that light
+  the dark.
+- **Cave collision & atmosphere.** Walking below a chamber ceiling drops you onto the cave floor
+  with a working head-clamp (no popping through rock). Underground, the sun and ambient light dim,
+  the fog closes in, and a warm **head-torch** switches on so you can see.
+- **First-person hand + held-item view model.** You now always see a low-poly hand on screen, with
+  the selected item held in it. Attacking/mining plays a real **swing animation** (arc + recoil),
+  and the view model has a subtle idle sway tied to head-bob. Fists swing when empty-handed.
+- **Enemy hit feedback.** Struck enemies **flash red**, take **knockback** away from the blow,
+  and show a floating **damage number** that rises and fades. Pigs are knocked back too.
+- **Cave tests.** The headless suite gained a full `VCCaves` section (determinism, structure,
+  sampling, entrance carve, world integration) — now **877 assertions**.
+
+### Fixed
+- **3D models not loading on GitHub Pages.** Added a `.nojekyll` file so Pages serves the model
+  folders verbatim (Jekyll was silently dropping/!-prefixed asset paths), and hardened the model
+  loader in `js/assets.js` with a longer timeout and one automatic retry for cold-cache stalls.
+
 ## [2.0] — Content, polish & systems overhaul
 
 This release closes out the major feature requests: real item art, visible held items,
